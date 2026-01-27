@@ -1,11 +1,12 @@
 [project]
-name = "pipecat-quickstart"
+name = "prosper-challenge"
 version = "0.1.0"
-description = "Quickstart example for building voice AI bots with Pipecat"
+description = "Template repository for clinic appointment scheduling voice agent challenge"
 requires-python = ">=3.10"
 dependencies = [
     "pipecat-ai[webrtc,daily,silero,elevenlabs,openai,local-smart-turn-v3,runner]",
-    "pipecat-ai-cli"
+    "pipecat-ai-cli",
+    "playwright",
 ]
 
 [dependency-groups]
