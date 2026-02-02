@@ -9,7 +9,7 @@ However, for the agent to be fully functional you'll need to implement the follo
 
 - Expand the agent's configuration so that it asks for the patient's name and date of birth
 - Once it finds the patient it should ask for the desired date and time of the appointment and create it
-- Implement the find patient and create appointment functionalities using Playwright
+- Implement the find patient and create appointment functionalities using Playwright or otherwise
 
 ## Setup
 
@@ -78,9 +78,9 @@ uv run bot.py
 
 1. **Agent Configuration**: Modify the agent's behavior to ask for patient name and date of birth, then appointment date and time. (This guide)[https://docs.pipecat.ai/guides/learn/function-calling] on function calling from Pipecat is probably a good start.
 
-2. **Find Patient Function**: Implement `healthie.find_patient(name, date_of_birth)` in `healthie.py` to search for patients in Healthie using Playwright.
+2. **Find Patient Function**: Implement `healthie.find_patient(name, date_of_birth)` in `healthie.py` to search for patients in Healthie.
 
-3. **Create Appointment Function**: Implement `healthie.create_appointment(patient_id, date, time)` in `healthie.py` to create appointments in Healthie using Playwright.
+3. **Create Appointment Function**: Implement `healthie.create_appointment(patient_id, date, time)` in `healthie.py` to create appointments in Healthie.
 
 4. **Integration**: Connect the voice agent to these functions so it can actually schedule appointments during conversations.
 
