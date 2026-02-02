@@ -74,18 +74,26 @@ uv run bot.py
 
 > 💡 First run note: The initial startup may take ~20 seconds as Pipecat downloads required models and imports.
 
-## What You Need to Implement
 
-1. **Agent Configuration**: Modify the agent's behavior to ask for patient name and date of birth, then appointment date and time. (This guide)[https://docs.pipecat.ai/guides/learn/function-calling] on function calling from Pipecat is probably a good start.
-
-2. **Find Patient Function**: Implement `healthie.find_patient(name, date_of_birth)` in `healthie.py` to search for patients in Healthie.
-
-3. **Create Appointment Function**: Implement `healthie.create_appointment(patient_id, date, time)` in `healthie.py` to create appointments in Healthie.
-
-4. **Integration**: Connect the voice agent to these functions so it can actually schedule appointments during conversations.
 
 ## Expectations & Deliverables
 
+To make the agent functional we expect you to implement at least the following missing functionalities:
+
+1. **Conversation Flow**: Modify the agent's behavior to ask for patient name and date of birth, then appointment date and time. (This guide)[https://docs.pipecat.ai/guides/learn/function-calling] on function calling from Pipecat is probably a good start.
+
+2. **Find Patient**: Implement `healthie.find_patient(name, date_of_birth)` in `healthie.py` to search for patients in Healthie.
+
+3. **Create Appointment**: Implement `healthie.create_appointment(patient_id, date, time)` in `healthie.py` to create appointments in Healthie.
+
+4. **Integration**: Connect the voice agent to these functions so it can actually schedule appointments during conversations.
+
 We encourage you to use AI tools (Claude Code, Cursor, etc.) to help you with this challenge. We don't mind if you "vibe code" everything, that probably means you have good prompting skills. What we do care about is whether you understand the decisions and trade-offs behind your solution. That's why, apart from the code itself, we'd like you to write a high-level overview of your solution and the decisions you've made to get to it—do this in a `SOLUTION.md` file at the root of your fork. During the interview we'll dive deeper into it and discuss opportunities to improve it in the future.
+
+If you'd like to go further, you can already document some of those potential improvements in your `SOLUTION.md`. Some areas that we'd love to hear your thoughts on are:
+- Latency: balancing speed with user experience and accuracy
+- Reliability: ensuring that the agent is always available to answer, regardless of external factors (e.g. AI provider unavailable)
+- Evaluation: making it easy for us to check that the agent is behaving how it is supposed to
+
 
 Once you are done, please share the link to your fork so that we can get familiar with it before our chat.
