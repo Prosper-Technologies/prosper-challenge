@@ -1,6 +1,6 @@
 # Prosper Challenge
 
-This is a template repository for an AI voice agent that is meant to schedule appointments for a health clinic. The foundations are already set:
+This is a template repository for an AI voice agent that is able to schedule appointments for a health clinic. To do that the agent connects in real-time to the clinic's CRM system, which in the healthcare industry is known as an Electronic Health Record (EHR). The foundations are already set:
 
 - Pipecat is configured with sensible defaults and the bot already introduces itself when initialized
 - Playwright is set up so that you can programmatically log into Healthie, the EHR we'll use for this challenge
@@ -84,8 +84,8 @@ uv run bot.py
 
 4. **Integration**: Connect the voice agent to these functions so it can actually schedule appointments during conversations.
 
-## Expectations & Deliverable
+## Expectations & Deliverables
 
-We encourage you to use AI tools (Claude Code, Cursor, etc.) to help you with this challenge. We don't mind if you fully "vibe code" the solution, that means you probably have good prompting skills. What we do care about is whether you understand the decisions and trade-offs behind your solutuion, as well as the opportunities to improve it in the future. This is what we'll evaluate during our review session.
+We encourage you to use AI tools (Claude Code, Cursor, etc.) to help you with this challenge. We don't mind if you "vibe code" everything, that probably means you have good prompting skills. What we do care about is whether you understand the decisions and trade-offs behind your solution. That's why, apart from the code itself, we'd like you to write a high-level overview of your solution and the decisions you've made to get to it—do this in a `SOLUTION.md` file at the root of your fork. During the interview we'll dive deeper into it and discuss opportunities to improve it in the future.
 
-Once you are done, please share share with us the link to your fork so that we can get familiar with it before our chat.
+Once you are done, please share the link to your fork so that we can get familiar with it before our chat.
