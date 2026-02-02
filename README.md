@@ -1,11 +1,11 @@
 # Prosper Challenge
 
-You've been given a template repository for an AI voice agent that is meant to schedule appointments for a clinic. The foundations are already set:
+This is a template repository for an AI voice agent that is meant to schedule appointments for a health clinic. The foundations are already set:
 
 - Pipecat is configured with sensible defaults and the bot already introduces itself when initialized
 - Playwright is set up so that you can programmatically log into Healthie, the EHR we'll use for this challenge
 
-In order for the voice agent to be fully functional you'll need to implement the following missing parts:
+However, for the agent to be fully functional you'll need to implement the following missig pieces:
 
 - Expand the agent's configuration so that it asks for the patient's name and date of birth
 - Once it finds the patient it should ask for the desired date and time of the appointment and create it
@@ -13,19 +13,14 @@ In order for the voice agent to be fully functional you'll need to implement the
 
 ## Setup
 
+To get started, fork this repository so that you can start commiting and pushing changes to your own copy.
+
 ### Prerequisites
 
 #### Environment
 
 - Python 3.10 or later
 - [uv](https://docs.astral.sh/uv/getting-started/installation/) package manager installed
-
-#### AI Service API keys
-
-You'll need API keys from the following services:
-
-- [ElevenLabs](https://elevenlabs.io/app/sign-up) for Speech-to-Text and Text-to-Speech
-- [OpenAI](https://auth.openai.com/create-account) for LLM inference
 
 #### Healthie Account
 
@@ -40,7 +35,7 @@ You'll need a Healthie account for testing, you can create one [here](https://se
    cd prosper-challenge
    ```
 
-2. Configure your API keys and Healthie credentials:
+2. Copy the API keys we've shared with you, as well as your Healthie credentials:
 
    Create a `.env` file:
 
@@ -69,7 +64,7 @@ You'll need a Healthie account for testing, you can create one [here](https://se
    uv run playwright install chromium
    ```
 
-## Running the Bot
+### Running the Bot
 
 ```bash
 uv run bot.py
@@ -89,22 +84,8 @@ uv run bot.py
 
 4. **Integration**: Connect the voice agent to these functions so it can actually schedule appointments during conversations.
 
-## Testing
+## Expectations & Deliverable
 
-You can test your implementation by:
+We encourage you to use AI tools (Claude Code, Cursor, etc.) to help you with this challenge. We don't mind if you fully "vibe code" the solution, that means you probably have good prompting skills. What we do care about is whether you understand the decisions and trade-offs behind your solutuion, as well as the opportunities to improve it in the future. This is what we'll evaluate during our review session.
 
-1. Running the bot and having a conversation where you provide:
-   - A patient name and date of birth
-   - A desired appointment date and time
-
-2. Verifying in Healthie that the appointment was created successfully
-
-3. Testing error cases (e.g., patient not found, invalid date/time, unavailable time slot)
-
-## Troubleshooting
-
-- **Browser permissions**: Allow microphone access when prompted
-- **Connection issues**: Try a different browser or check VPN/firewall settings
-- **Audio issues**: Verify microphone and speakers are working and not muted
-- **Playwright issues**: Make sure you've run `uv run playwright install chromium`
-- **Healthie login issues**: Verify your credentials are correct in the `.env` file
+Once you are done, please share share with us the link to your fork so that we can get familiar with it before our chat.
