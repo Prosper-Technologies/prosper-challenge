@@ -294,6 +294,10 @@ async def handle_create_appointment(args: FlowArgs, flow_manager: FlowManager):
 
 **Files**: `bot.py`
 
+### Important: context_aggregator must be the full pair
+
+Research confirmed that FlowManager expects the **full `LLMContextAggregatorPair` object** (not just the assistant half). Internally, FlowManager inspects the type and creates a `UniversalLLMAdapter` from the pair. The current `bot.py` constructs the pair manually via `LLMContextAggregatorPair(context, ...)`. We need to switch to `llm.create_context_aggregator(context)` which returns a pair object compatible with FlowManager, and then use `.user()` / `.assistant()` in the pipeline.
+
 ### Steps
 
 3.1. **Add imports** (after existing imports, around line 59):
@@ -302,7 +306,7 @@ from pipecat_flows import FlowManager
 from prompts.scheduling import create_greeting_node
 ```
 
-3.2. **Remove the old hardcoded system prompt** (lines 79-84):
+3.2. **Remove the old hardcoded system prompt and manual aggregator setup** (lines 79-94):
 ```python
 # DELETE these lines:
 messages = [
@@ -311,17 +315,45 @@ messages = [
         "content": "You are a friendly AI assistant. Respond naturally and keep your answers conversational.",
     },
 ]
-```
 
-3.3. **Remove old context creation** (line 86):
-```python
-# DELETE this line:
 context = LLMContext(messages)
+user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
+    context,
+    user_params=LLMUserAggregatorParams(
+        user_turn_strategies=UserTurnStrategies(
+            stop=[TurnAnalyzerUserTurnStopStrategy(turn_analyzer=LocalSmartTurnAnalyzerV3())]
+        ),
+    ),
+)
 ```
 
-3.4. **Replace with FlowManager-compatible context** -- the `LLMContextAggregatorPair` still needs a context, but FlowManager will manage the messages. Create an empty context:
+3.3. **Replace with FlowManager-compatible setup**:
 ```python
 context = LLMContext()
+context_aggregator = llm.create_context_aggregator(
+    context,
+    user_params=LLMUserAggregatorParams(
+        user_turn_strategies=UserTurnStrategies(
+            stop=[TurnAnalyzerUserTurnStopStrategy(turn_analyzer=LocalSmartTurnAnalyzerV3())]
+        ),
+    ),
+)
+```
+
+3.4. **Update the pipeline** to use `context_aggregator.user()` and `context_aggregator.assistant()`:
+```python
+pipeline = Pipeline(
+    [
+        transport.input(),
+        rtvi,
+        stt,
+        context_aggregator.user(),     # was: user_aggregator
+        llm,
+        tts,
+        transport.output(),
+        context_aggregator.assistant(),  # was: assistant_aggregator
+    ]
+)
 ```
 
 3.5. **Create FlowManager after task creation** (after line 118):
@@ -329,12 +361,10 @@ context = LLMContext()
 flow_manager = FlowManager(
     task=task,
     llm=llm,
-    context_aggregator=assistant_aggregator,
+    context_aggregator=context_aggregator,
     transport=transport,
 )
 ```
-
-Note: `context_aggregator` should be the **assistant_aggregator** based on pipecat-flows examples.
 
 3.6. **Replace the on_client_connected handler** (lines 120-125):
 ```python
@@ -352,18 +382,25 @@ async def on_client_connected(transport, client):
     await flow_manager.initialize(create_greeting_node())
 ```
 
-3.7. **Clean up unused imports** -- remove `LLMRunFrame` from the frames import if no longer used elsewhere.
+3.7. **Clean up unused imports**:
+- Remove `LLMRunFrame` from the frames import
+- Remove `LLMContextAggregatorPair` import (no longer used directly)
+- Remove `LLMContext` if it's fully replaced by `llm.create_context_aggregator`
+- Keep `LLMUserAggregatorParams`, `UserTurnStrategies`, `TurnAnalyzerUserTurnStopStrategy` (still needed)
 
 ### Summary of bot.py changes
-- **Added**: 2 import lines
-- **Removed**: ~7 lines (old messages, old LLMContext creation, old on_connect body)
-- **Modified**: ~5 lines (empty LLMContext, FlowManager creation, on_connect handler)
-- **Net change**: ~14 lines touched
+- **Added**: 2 import lines (FlowManager, create_greeting_node)
+- **Removed**: old messages list, old LLMContext, old manual aggregator pair, old on_connect body
+- **Modified**: context creation via `llm.create_context_aggregator()`, pipeline references, FlowManager init
+- **Net change**: ~20 lines touched
 
 ### Verification
-- Bot starts without errors: `uv run bot.py`
-- On browser connect, bot greets patient and asks for name + DOB
-- (Full end-to-end test requires healthie.py implementations)
+1. `uv run python -c "from pipecat_flows import FlowManager; print('OK')"` -- dependency works
+2. `uv run python -c "from prompts.scheduling import create_greeting_node; print('OK')"` -- prompts module works
+3. `uv run bot.py` -- bot starts without errors
+4. Open `http://localhost:7860/client`, click Connect -- bot greets and asks for name + DOB
+5. Provide name + DOB -- bot acknowledges patient found, asks for date + time
+6. Provide date + time -- bot confirms appointment and says goodbye
 
 ---
 
@@ -424,21 +461,215 @@ async def create_appointment(patient_id, date, time):
 
 ---
 
+## Phase 5: Add tests
+
+**Files**: `tests/__init__.py`, `tests/test_scheduling_flow.py`
+
+### Context
+We need pytest tests that verify the conversation flow logic without requiring real AI services or a running bot. The tests focus on:
+- Node definitions return correct structure (task_messages, functions, post_actions)
+- Handler functions transition to the correct nodes based on healthie return values
+- FlowManager state is updated correctly by handlers
+
+### Steps
+
+5.1. Add `pytest` as a dev dependency in `pyproject.toml`:
+```toml
+[dependency-groups]
+dev = [
+    ...,
+    "pytest",
+    "pytest-asyncio",
+]
+```
+
+5.2. Create `tests/__init__.py` (empty).
+
+5.3. Create `tests/test_scheduling_flow.py`:
+
+```python
+"""Tests for the scheduling conversation flow."""
+
+import pytest
+
+from prompts.scheduling import (
+    ROLE_MESSAGES,
+    create_appointment_node,
+    create_confirmation_node,
+    create_greeting_node,
+    create_patient_not_found_node,
+    handle_create_appointment,
+    handle_find_patient,
+)
+
+
+# --- Node structure tests ---
+
+class TestNodeDefinitions:
+    """Verify each node returns the expected structure."""
+
+    def test_greeting_node_has_role_and_task_messages(self):
+        node = create_greeting_node()
+        assert node["role_messages"] == ROLE_MESSAGES
+        assert len(node["task_messages"]) == 1
+        assert node["task_messages"][0]["role"] == "system"
+
+    def test_greeting_node_has_find_patient_function(self):
+        node = create_greeting_node()
+        assert len(node["functions"]) == 1
+        assert node["functions"][0].name == "find_patient"
+
+    def test_appointment_node_has_create_appointment_function(self):
+        node = create_appointment_node()
+        assert len(node["functions"]) == 1
+        assert node["functions"][0].name == "create_appointment"
+
+    def test_appointment_node_has_no_role_messages(self):
+        """role_messages are only set in greeting; pipecat-flows persists them."""
+        node = create_appointment_node()
+        assert "role_messages" not in node
+
+    def test_confirmation_node_has_no_functions(self):
+        node = create_confirmation_node()
+        assert node["functions"] == []
+
+    def test_confirmation_node_has_end_conversation_post_action(self):
+        node = create_confirmation_node()
+        assert node["post_actions"] == [{"type": "end_conversation"}]
+
+    def test_patient_not_found_node_has_find_patient_function(self):
+        node = create_patient_not_found_node()
+        assert len(node["functions"]) == 1
+        assert node["functions"][0].name == "find_patient"
+
+
+# --- Handler tests ---
+
+class FakeFlowManager:
+    """Minimal mock for FlowManager -- only needs .state dict."""
+    def __init__(self):
+        self.state = {}
+
+
+class TestHandleFindPatient:
+    """Test handle_find_patient transitions and state updates."""
+
+    @pytest.mark.asyncio
+    async def test_patient_found_transitions_to_appointment_node(self):
+        fm = FakeFlowManager()
+        result_msg, next_node = await handle_find_patient(
+            {"name": "Jane Doe", "date_of_birth": "1990-01-15"}, fm
+        )
+        assert "Jane Doe" in result_msg
+        assert next_node is not None
+        # Should transition to appointment node (has create_appointment function)
+        assert len(next_node["functions"]) == 1
+        assert next_node["functions"][0].name == "create_appointment"
+
+    @pytest.mark.asyncio
+    async def test_patient_found_updates_state(self):
+        fm = FakeFlowManager()
+        await handle_find_patient(
+            {"name": "Jane Doe", "date_of_birth": "1990-01-15"}, fm
+        )
+        assert fm.state["patient_id"] == "dummy-123"
+        assert fm.state["patient_name"] == "Jane Doe"
+
+    @pytest.mark.asyncio
+    async def test_patient_not_found_transitions_to_not_found_node(self):
+        # This test will need updating when find_patient uses real Healthie
+        # For now with dummy implementation, patient is always found
+        # We test the handler logic by monkeypatching
+        import prompts.scheduling as scheduling
+        original = scheduling.find_patient
+
+        async def fake_not_found(name, dob):
+            return None
+
+        scheduling.find_patient = fake_not_found
+        try:
+            fm = FakeFlowManager()
+            result_msg, next_node = await handle_find_patient(
+                {"name": "Nobody", "date_of_birth": "2000-01-01"}, fm
+            )
+            assert "not found" in result_msg.lower()
+            assert next_node is not None
+            assert next_node["functions"][0].name == "find_patient"
+        finally:
+            scheduling.find_patient = original
+
+
+class TestHandleCreateAppointment:
+    """Test handle_create_appointment transitions and state updates."""
+
+    @pytest.mark.asyncio
+    async def test_appointment_created_transitions_to_confirmation(self):
+        fm = FakeFlowManager()
+        fm.state["patient_id"] = "dummy-123"
+        result_msg, next_node = await handle_create_appointment(
+            {"date": "2026-04-01", "time": "10:00"}, fm
+        )
+        assert "2026-04-01" in result_msg
+        assert "10:00" in result_msg
+        assert next_node is not None
+        assert next_node["functions"] == []
+        assert next_node["post_actions"] == [{"type": "end_conversation"}]
+
+    @pytest.mark.asyncio
+    async def test_appointment_created_updates_state(self):
+        fm = FakeFlowManager()
+        fm.state["patient_id"] = "dummy-123"
+        await handle_create_appointment(
+            {"date": "2026-04-01", "time": "10:00"}, fm
+        )
+        assert fm.state["appointment"]["appointment_id"] == "appt-456"
+        assert fm.state["appointment"]["date"] == "2026-04-01"
+
+    @pytest.mark.asyncio
+    async def test_appointment_failed_stays_on_same_node(self):
+        import prompts.scheduling as scheduling
+        original = scheduling.create_appointment
+
+        async def fake_fail(patient_id, date, time):
+            return None
+
+        scheduling.create_appointment = fake_fail
+        try:
+            fm = FakeFlowManager()
+            fm.state["patient_id"] = "dummy-123"
+            result_msg, next_node = await handle_create_appointment(
+                {"date": "2026-04-01", "time": "10:00"}, fm
+            )
+            assert "sorry" in result_msg.lower()
+            assert next_node is None  # stays on current node
+        finally:
+            scheduling.create_appointment = original
+```
+
+### Verification
+- `uv run pytest tests/ -v` -- all tests pass
+- Tests cover: node structure (7 tests), handler happy paths (4 tests), handler error paths (2 tests)
+- Total: ~13 tests
+
+---
+
 ## Files Changed Summary
 
 | File | Change | Lines |
 |------|--------|-------|
-| `pyproject.toml` | Add `pipecat-ai-flows` dependency | ~1 |
+| `pyproject.toml` | Add `pipecat-ai-flows`, `pytest`, `pytest-asyncio` | ~3 |
 | `prompts/__init__.py` | New empty file | 0 |
 | `prompts/scheduling.py` | New file: nodes, prompts, handlers | ~150 |
-| `bot.py` | Wire FlowManager, remove old prompt | ~14 |
+| `bot.py` | Wire FlowManager, remove old prompt | ~20 |
 | `healthie.py` | Make async + dummy implementations | ~10 |
+| `tests/__init__.py` | New empty file | 0 |
+| `tests/test_scheduling_flow.py` | New file: node + handler tests | ~130 |
 
-**Total new code**: ~150 lines (prompts/scheduling.py)
-**Total modified code**: ~24 lines across bot.py + healthie.py
+**Total new code**: ~280 lines (prompts/scheduling.py + tests)
+**Total modified code**: ~30 lines across bot.py + healthie.py + pyproject.toml
 
-## Open Questions
+## Resolved Questions
 
-1. **FlowManager `context_aggregator` parameter**: The research suggests passing the assistant_aggregator, but some examples pass a different aggregator. Need to verify at implementation time.
-2. **`post_actions: end_conversation`**: Need to confirm this action type exists in the installed version of pipecat-flows. If not, we can remove it and let the conversation end naturally.
-3. **Healthie function return format**: The handlers assume `find_patient` returns `{"patient_id": ..., "name": ...}` and `create_appointment` returns a dict. The dummy implementations now define this contract explicitly.
+1. **FlowManager `context_aggregator` parameter**: RESOLVED. Must pass the full `LLMContextAggregatorPair` object returned by `llm.create_context_aggregator(context)`. FlowManager internally inspects the type and creates a `UniversalLLMAdapter`. Updated Phase 3 accordingly.
+2. **`post_actions: end_conversation`**: RESOLVED. This is a built-in action type in pipecat-flows. No registration needed. It fires after the LLM response and TTS finish, cleanly ending the session.
+3. **Healthie function return format**: RESOLVED. Dummy implementations define the contract explicitly. Handlers depend on `patient_id`, `name` from find_patient and `appointment_id`, `patient_id`, `date`, `time` from create_appointment.
