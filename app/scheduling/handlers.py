@@ -27,7 +27,7 @@ async def handle_find_patient(args: FlowArgs, flow_manager: FlowManager):
         )
     else:
         return (
-            "No patient found with that name and date of birth.",
+            "Patient not found with that name and date of birth.",
             create_patient_not_found_node(),
         )
 
