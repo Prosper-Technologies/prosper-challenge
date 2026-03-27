@@ -5,7 +5,7 @@ branch: main
 repository: healthie-agent
 topic: "Implement scheduling conversation flow using pipecat-flows"
 tags: [plan, conversation-flow, pipecat-flows, scheduling]
-status: draft
+status: completed
 autonomy: critical
 last_updated: 2026-03-27
 last_updated_by: claude
