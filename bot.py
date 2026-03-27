@@ -36,15 +36,12 @@ from pipecat.audio.vad.silero import SileroVADAnalyzer
 logger.info("✅ Silero VAD model loaded")
 
 from pipecat.audio.vad.vad_analyzer import VADParams
-from pipecat.frames.frames import LLMRunFrame
-
 logger.info("Loading pipeline components...")
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import (
-    LLMContextAggregatorPair,
     LLMUserAggregatorParams,
 )
 from pipecat.processors.frameworks.rtvi import RTVIObserver, RTVIProcessor
@@ -58,6 +55,9 @@ from pipecat.turns.user_stop.turn_analyzer_user_turn_stop_strategy import (
     TurnAnalyzerUserTurnStopStrategy,
 )
 from pipecat.turns.user_turn_strategies import UserTurnStrategies
+from pipecat_flows import FlowManager
+
+from app.scheduling import create_greeting_node
 
 logger.info("✅ All components loaded successfully!")
 
@@ -76,15 +76,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     llm = OpenAILLMService(api_key=os.environ["OPENAI_API_KEY"])
 
-    messages = [
-        {
-            "role": "system",
-            "content": "You are a friendly AI assistant. Respond naturally and keep your answers conversational.",
-        },
-    ]
-
-    context = LLMContext(messages)
-    user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
+    context = LLMContext()
+    context_aggregator = llm.create_context_aggregator(
         context,
         user_params=LLMUserAggregatorParams(
             user_turn_strategies=UserTurnStrategies(
@@ -100,11 +93,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             transport.input(),  # Transport user input
             rtvi,  # RTVI processor
             stt,
-            user_aggregator,  # User responses
+            context_aggregator.user(),  # User responses
             llm,  # LLM
             tts,  # TTS
             transport.output(),  # Transport bot output
-            assistant_aggregator,  # Assistant spoken responses
+            context_aggregator.assistant(),  # Assistant spoken responses
         ]
     )
 
@@ -117,12 +110,17 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         observers=[RTVIObserver(rtvi)],
     )
 
+    flow_manager = FlowManager(
+        task=task,
+        llm=llm,
+        context_aggregator=context_aggregator,
+        transport=transport,
+    )
+
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
-        # Kick off the conversation.
-        messages.append({"role": "system", "content": "Say hello and briefly introduce yourself as a digital assistant from the Prosper Health clinic."})
-        await task.queue_frames([LLMRunFrame()])
+        await flow_manager.initialize(create_greeting_node())
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
