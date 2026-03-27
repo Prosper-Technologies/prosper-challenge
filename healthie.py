@@ -1,4 +1,5 @@
-"""Healthie EHR integration module.
+"""
+Healthie EHR integration module.
 
 This module provides functions to interact with Healthie for patient management
 and appointment scheduling.

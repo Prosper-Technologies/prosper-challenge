@@ -28,15 +28,41 @@ Add a structured conversation flow so the bot:
 4. Calls `create_appointment` to book the appointment
 5. Confirms the booking or handles errors gracefully
 
-All prompts/node definitions live in `prompts/scheduling.py`. The `bot.py` changes are minimal: import FlowManager, wire it up, remove the old hardcoded prompt.
+The code is organized under `app/`: **`app/scheduling/`** holds the conversation flow (prompts, nodes, handlers), **`app/shared/tools/`** holds backend-agnostic tool functions reusable across flows, and **`healthie.py`** remains the low-level Healthie API client (unused until tools go real). See brainstorm: `thoughts/shared/brainstorms/2026-03-27-code-structure.md`.
 
 ## Architecture
 
 ```
-prompts/scheduling.py          # Node definitions, system prompts, tool schemas, handlers
-bot.py                         # Pipeline setup, FlowManager initialization
-healthie.py                    # Healthie API calls (unchanged in this plan)
+bot.py                                    # Pipeline setup, FlowManager initialization
+                                          #   imports from: app.scheduling
+
+app/
+  __init__.py
+  scheduling/                             # Scheduling conversation flow
+    __init__.py                           # Public API: exports create_greeting_node
+    prompts.py                            # ROLE_MESSAGES, task message strings
+    nodes.py                              # create_*_node() functions + FlowsFunctionSchema
+    handlers.py                           # handle_find_patient, handle_create_appointment
+                                          #   imports from: app.shared.tools
+  shared/
+    __init__.py
+    tools/                                # Abstract tool capabilities (reusable across flows)
+      __init__.py
+      find_patient.py                     # Patient lookup (dummy impl for now)
+      create_appointment.py               # Appointment creation (dummy impl for now)
+
+healthie.py                               # Low-level Healthie Playwright automation (unused until tools go real)
 ```
+
+### Dependency Chain (current, with dummies)
+```
+bot.py → app.scheduling → app.shared.tools
+```
+### Dependency Chain (future, with real Healthie)
+```
+bot.py → app.scheduling → app.shared.tools → healthie
+```
+Each layer only knows about the one below it. No circular dependencies.
 
 ### Conversation Graph
 
@@ -71,31 +97,106 @@ healthie.py                    # Healthie API calls (unchanged in this plan)
 
 ---
 
-## Phase 2: Create `prompts/scheduling.py`
+## Phase 2: Create `app/shared/tools/` (shared tool abstraction layer)
 
-**Files**: `prompts/__init__.py` (empty), `prompts/scheduling.py` (new)
+**Files**: `app/__init__.py`, `app/shared/__init__.py`, `app/shared/tools/__init__.py`, `app/shared/tools/find_patient.py`, `app/shared/tools/create_appointment.py`
 
-This file owns all conversation flow logic: node definitions, system prompts, tool schemas, and handler functions.
+The tools layer provides abstract capabilities that any flow's handlers can call. Tools live under `app/shared/` because they're not specific to scheduling -- other flows (e.g., intake) may reuse them. Each tool is in its own file with a dummy implementation. When we implement real Healthie integration later, these files will import from `healthie.py` -- but for now they're self-contained.
 
 ### Steps
 
-2.1. Create `prompts/__init__.py` (empty file to make it a package).
-
-2.2. Create `prompts/scheduling.py` with the following structure:
-
+2.1. Create package files:
+- `app/__init__.py` (empty)
+- `app/shared/__init__.py` (empty)
+- `app/shared/tools/__init__.py`:
 ```python
-"""Scheduling conversation flow using pipecat-flows.
+from .find_patient import find_patient
+from .create_appointment import create_appointment
+```
 
-Defines the node graph for the appointment scheduling conversation:
-  greeting_node -> appointment_node -> confirmation_node
+2.2. Create `app/shared/tools/find_patient.py`:
+```python
+"""Patient lookup tool.
+
+Dummy implementation for now. Will be backed by Healthie (or another EHR)
+in a future PR. The flow layer calls this function without knowing
+which backend fulfills the request.
 """
 
-from pipecat_flows import FlowArgs, FlowManager, FlowsFunctionSchema, NodeConfig
 
-from healthie import find_patient, create_appointment
+async def find_patient(name: str, date_of_birth: str) -> dict | None:
+    """Look up a patient by name and date of birth.
+
+    Args:
+        name: The patient's full name.
+        date_of_birth: The patient's date of birth (YYYY-MM-DD).
+
+    Returns:
+        dict with patient_id, name, date_of_birth if found, or None.
+    """
+    # TODO: Replace with real Healthie lookup via healthie.py
+    return {"patient_id": "dummy-123", "name": name, "date_of_birth": date_of_birth}
+```
+
+2.3. Create `app/shared/tools/create_appointment.py`:
+```python
+"""Appointment creation tool.
+
+Dummy implementation for now. Will be backed by Healthie (or another EHR)
+in a future PR. The flow layer calls this function without knowing
+which backend fulfills the request.
+"""
 
 
-# --- Role message (persistent across all nodes) ---
+async def create_appointment(patient_id: str, date: str, time: str) -> dict | None:
+    """Create an appointment for a patient.
+
+    Args:
+        patient_id: The patient's ID from find_patient.
+        date: The appointment date (YYYY-MM-DD).
+        time: The appointment time (HH:MM, 24-hour).
+
+    Returns:
+        dict with appointment_id, patient_id, date, time if created, or None.
+    """
+    # TODO: Replace with real Healthie appointment creation via healthie.py
+    return {"appointment_id": "appt-456", "patient_id": patient_id, "date": date, "time": time}
+```
+
+### Key design decisions
+- Each tool is a standalone async function with a clear return contract
+- Tools are backend-agnostic -- swapping from Healthie to another service means changing the tool internals, not the flow
+- The `__init__.py` re-exports for clean imports: `from app.shared.tools import find_patient`
+- Dummy implementations always succeed, enabling happy-path end-to-end testing
+
+### Verification
+- `uv run python -c "from app.shared.tools import find_patient, create_appointment; print('OK')"`
+- `uv run python -c "import asyncio; from app.shared.tools import find_patient; print(asyncio.run(find_patient('Jane Doe', '1990-01-15')))"` returns `{'patient_id': 'dummy-123', ...}`
+
+---
+
+## Phase 3: Create `app/scheduling/` (conversation flow layer)
+
+**Files**: `app/scheduling/__init__.py`, `app/scheduling/prompts.py`, `app/scheduling/nodes.py`, `app/scheduling/handlers.py`
+
+The scheduling flow lives directly in `app/scheduling/` -- no extra `flows/` subfolder needed since the folder IS the flow. It's split into three files:
+- **prompts.py** -- system messages (editable independently from logic)
+- **nodes.py** -- node factory functions + tool schemas (the graph structure)
+- **handlers.py** -- async business logic (calls shared tools, manages state transitions)
+
+### Steps
+
+3.1. Create `app/scheduling/__init__.py`:
+```python
+from .nodes import create_greeting_node
+```
+
+3.2. Create `app/scheduling/prompts.py`:
+```python
+"""System prompts for the scheduling conversation flow.
+
+Edit these to change what the bot says without touching flow logic.
+"""
 
 ROLE_MESSAGES = [
     {
@@ -108,38 +209,134 @@ ROLE_MESSAGES = [
     }
 ]
 
+GREETING_TASK = (
+    "Greet the patient warmly and introduce yourself as a digital assistant "
+    "from the Prosper Health clinic. Tell them you can help schedule an appointment. "
+    "Ask for their full name and date of birth so you can look them up in the system. "
+    "You must collect BOTH the name and date of birth before calling the function."
+)
 
-# --- Node definitions ---
+APPOINTMENT_TASK = (
+    "The patient has been found in the system. Now ask them for their preferred "
+    "appointment date and time. Once they provide both, create the appointment. "
+    "Be flexible with how they express dates and times, but confirm the exact "
+    "date and time before proceeding."
+)
+
+CONFIRMATION_TASK = (
+    "The appointment has been booked. Summarize the appointment details "
+    "(patient name, date, and time) back to the patient. Ask if there's "
+    "anything else you can help with. If not, say goodbye warmly."
+)
+
+PATIENT_NOT_FOUND_TASK = (
+    "The patient was not found in the system. Apologize and ask if they'd like "
+    "to try again with different details. If they want to retry, ask for their "
+    "name and date of birth again."
+)
+```
+
+3.3. Create `app/scheduling/handlers.py`:
+```python
+"""Handler functions for the scheduling conversation flow.
+
+Each handler is called when the LLM invokes a tool. Handlers call
+tools from the tools layer and return (message, next_node) tuples.
+"""
+
+from pipecat_flows import FlowArgs, FlowManager
+
+from app.shared.tools import find_patient, create_appointment
+
+
+async def handle_find_patient(args: FlowArgs, flow_manager: FlowManager):
+    """Handle the find_patient tool call. Transitions to appointment or not-found node."""
+    from .nodes import create_appointment_node, create_patient_not_found_node
+
+    name = args["name"]
+    date_of_birth = args["date_of_birth"]
+
+    result = await find_patient(name, date_of_birth)
+
+    if result:
+        flow_manager.state["patient_id"] = result["patient_id"]
+        flow_manager.state["patient_name"] = result["name"]
+        return (
+            f"Patient found: {result['name']}.",
+            create_appointment_node(),
+        )
+    else:
+        return (
+            "No patient found with that name and date of birth.",
+            create_patient_not_found_node(),
+        )
+
+
+async def handle_create_appointment(args: FlowArgs, flow_manager: FlowManager):
+    """Handle the create_appointment tool call. Transitions to confirmation node."""
+    from .nodes import create_confirmation_node
+
+    patient_id = flow_manager.state["patient_id"]
+    date = args["date"]
+    time = args["time"]
+
+    result = await create_appointment(patient_id, date, time)
+
+    if result:
+        flow_manager.state["appointment"] = result
+        return (
+            f"Appointment created for {date} at {time}.",
+            create_confirmation_node(),
+        )
+    else:
+        return (
+            "Sorry, there was an issue creating the appointment. Please try a different date or time.",
+            None,  # Stay on appointment node to retry
+        )
+```
+
+3.4. Create `app/scheduling/nodes.py`:
+```python
+"""Node definitions for the scheduling conversation flow.
+
+Each function returns a NodeConfig dict that pipecat-flows uses
+to configure a conversation state.
+"""
+
+from pipecat_flows import FlowsFunctionSchema, NodeConfig
+
+from .prompts import (
+    APPOINTMENT_TASK,
+    CONFIRMATION_TASK,
+    GREETING_TASK,
+    PATIENT_NOT_FOUND_TASK,
+    ROLE_MESSAGES,
+)
+from .handlers import handle_create_appointment, handle_find_patient
+
+
+FIND_PATIENT_SCHEMA = {
+    "name": {
+        "type": "string",
+        "description": "The patient's full name",
+    },
+    "date_of_birth": {
+        "type": "string",
+        "description": "The patient's date of birth in YYYY-MM-DD format",
+    },
+}
+
 
 def create_greeting_node() -> NodeConfig:
     """Initial node: greet patient, ask for name and date of birth."""
     return {
         "role_messages": ROLE_MESSAGES,
-        "task_messages": [
-            {
-                "role": "system",
-                "content": (
-                    "Greet the patient warmly and introduce yourself as a digital assistant "
-                    "from the Prosper Health clinic. Tell them you can help schedule an appointment. "
-                    "Ask for their full name and date of birth so you can look them up in the system. "
-                    "You must collect BOTH the name and date of birth before calling the function."
-                ),
-            }
-        ],
+        "task_messages": [{"role": "system", "content": GREETING_TASK}],
         "functions": [
             FlowsFunctionSchema(
                 name="find_patient",
                 description="Look up a patient by name and date of birth",
-                properties={
-                    "name": {
-                        "type": "string",
-                        "description": "The patient's full name",
-                    },
-                    "date_of_birth": {
-                        "type": "string",
-                        "description": "The patient's date of birth in YYYY-MM-DD format",
-                    },
-                },
+                properties=FIND_PATIENT_SCHEMA,
                 required=["name", "date_of_birth"],
                 handler=handle_find_patient,
             )
@@ -150,17 +347,7 @@ def create_greeting_node() -> NodeConfig:
 def create_appointment_node() -> NodeConfig:
     """Second node: ask for appointment date and time."""
     return {
-        "task_messages": [
-            {
-                "role": "system",
-                "content": (
-                    "The patient has been found in the system. Now ask them for their preferred "
-                    "appointment date and time. Once they provide both, create the appointment. "
-                    "Be flexible with how they express dates and times, but confirm the exact "
-                    "date and time before proceeding."
-                ),
-            }
-        ],
+        "task_messages": [{"role": "system", "content": APPOINTMENT_TASK}],
         "functions": [
             FlowsFunctionSchema(
                 name="create_appointment",
@@ -185,16 +372,7 @@ def create_appointment_node() -> NodeConfig:
 def create_confirmation_node() -> NodeConfig:
     """Final node: confirm booking and say goodbye."""
     return {
-        "task_messages": [
-            {
-                "role": "system",
-                "content": (
-                    "The appointment has been booked. Summarize the appointment details "
-                    "(patient name, date, and time) back to the patient. Ask if there's "
-                    "anything else you can help with. If not, say goodbye warmly."
-                ),
-            }
-        ],
+        "task_messages": [{"role": "system", "content": CONFIRMATION_TASK}],
         "functions": [],
         "post_actions": [{"type": "end_conversation"}],
     }
@@ -203,94 +381,33 @@ def create_confirmation_node() -> NodeConfig:
 def create_patient_not_found_node() -> NodeConfig:
     """Error node: patient not found, offer to retry or end."""
     return {
-        "task_messages": [
-            {
-                "role": "system",
-                "content": (
-                    "The patient was not found in the system. Apologize and ask if they'd like "
-                    "to try again with different details. If they want to retry, ask for their "
-                    "name and date of birth again."
-                ),
-            }
-        ],
+        "task_messages": [{"role": "system", "content": PATIENT_NOT_FOUND_TASK}],
         "functions": [
             FlowsFunctionSchema(
                 name="find_patient",
                 description="Look up a patient by name and date of birth",
-                properties={
-                    "name": {
-                        "type": "string",
-                        "description": "The patient's full name",
-                    },
-                    "date_of_birth": {
-                        "type": "string",
-                        "description": "The patient's date of birth in YYYY-MM-DD format",
-                    },
-                },
+                properties=FIND_PATIENT_SCHEMA,
                 required=["name", "date_of_birth"],
                 handler=handle_find_patient,
             )
         ],
     }
-
-
-# --- Handler functions ---
-
-async def handle_find_patient(args: FlowArgs, flow_manager: FlowManager):
-    """Handle the find_patient tool call. Transitions to appointment or not-found node."""
-    name = args["name"]
-    date_of_birth = args["date_of_birth"]
-
-    result = await find_patient(name, date_of_birth)
-
-    if result:
-        flow_manager.state["patient_id"] = result["patient_id"]
-        flow_manager.state["patient_name"] = result["name"]
-        return (
-            f"Patient found: {result['name']}.",
-            create_appointment_node(),
-        )
-    else:
-        return (
-            "No patient found with that name and date of birth.",
-            create_patient_not_found_node(),
-        )
-
-
-async def handle_create_appointment(args: FlowArgs, flow_manager: FlowManager):
-    """Handle the create_appointment tool call. Transitions to confirmation node."""
-    patient_id = flow_manager.state["patient_id"]
-    date = args["date"]
-    time = args["time"]
-
-    result = await create_appointment(patient_id, date, time)
-
-    if result:
-        flow_manager.state["appointment"] = result
-        return (
-            f"Appointment created for {date} at {time}.",
-            create_confirmation_node(),
-        )
-    else:
-        return (
-            "Sorry, there was an issue creating the appointment. Please try a different date or time.",
-            None,  # Stay on appointment node to retry
-        )
 ```
 
 ### Key design decisions
-- **ROLE_MESSAGES** is defined once and set in the greeting node; pipecat-flows persists it across transitions.
-- **Handlers import and call `healthie.find_patient` / `healthie.create_appointment` directly** -- this is the bridge between the conversation flow and the Healthie integration. When the stubs are implemented later, the flow will work end-to-end without changes.
-- **`patient_not_found_node`** reuses the same `find_patient` tool schema, allowing the patient to retry.
-- **`create_confirmation_node`** has no functions and uses `post_actions: end_conversation` to cleanly close the session.
+- **prompts.py** is pure text -- clinicians or prompt engineers can edit without touching logic
+- **nodes.py** imports handlers at module level; **handlers.py** uses late imports for nodes (breaks circular dependency)
+- **FIND_PATIENT_SCHEMA** is defined once and reused in greeting + not-found nodes
+- **ROLE_MESSAGES** is set in greeting node only; pipecat-flows persists it across transitions
+- **`app/scheduling/__init__.py`** exports `create_greeting_node` -- the single entry point for bot.py
 
 ### Verification
-- File imports without errors: `uv run python -c "from prompts.scheduling import create_greeting_node; print('OK')"`
-- With dummy healthie implementations (Phase 4), full flow is testable end-to-end
+- `uv run python -c "from app.scheduling import create_greeting_node; print('OK')"`
+- With dummy tool implementations (Phase 2), full flow is testable end-to-end
 
 ---
 
-## Phase 3: Modify `bot.py` to use FlowManager
+## Phase 4: Modify `bot.py` to use FlowManager
 
 **Files**: `bot.py`
 
@@ -300,13 +417,13 @@ Research confirmed that FlowManager expects the **full `LLMContextAggregatorPair
 
 ### Steps
 
-3.1. **Add imports** (after existing imports, around line 59):
+4.1. **Add imports** (after existing imports, around line 59):
 ```python
 from pipecat_flows import FlowManager
-from prompts.scheduling import create_greeting_node
+from app.scheduling import create_greeting_node
 ```
 
-3.2. **Remove the old hardcoded system prompt and manual aggregator setup** (lines 79-94):
+4.2. **Remove the old hardcoded system prompt and manual aggregator setup** (lines 79-94):
 ```python
 # DELETE these lines:
 messages = [
@@ -327,7 +444,7 @@ user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
 )
 ```
 
-3.3. **Replace with FlowManager-compatible setup**:
+4.3. **Replace with FlowManager-compatible setup**:
 ```python
 context = LLMContext()
 context_aggregator = llm.create_context_aggregator(
@@ -340,7 +457,7 @@ context_aggregator = llm.create_context_aggregator(
 )
 ```
 
-3.4. **Update the pipeline** to use `context_aggregator.user()` and `context_aggregator.assistant()`:
+4.4. **Update the pipeline** to use `context_aggregator.user()` and `context_aggregator.assistant()`:
 ```python
 pipeline = Pipeline(
     [
@@ -356,7 +473,7 @@ pipeline = Pipeline(
 )
 ```
 
-3.5. **Create FlowManager after task creation** (after line 118):
+4.5. **Create FlowManager after task creation** (after line 118):
 ```python
 flow_manager = FlowManager(
     task=task,
@@ -366,7 +483,7 @@ flow_manager = FlowManager(
 )
 ```
 
-3.6. **Replace the on_client_connected handler** (lines 120-125):
+4.6. **Replace the on_client_connected handler** (lines 120-125):
 ```python
 # REPLACE:
 @transport.event_handler("on_client_connected")
@@ -382,7 +499,7 @@ async def on_client_connected(transport, client):
     await flow_manager.initialize(create_greeting_node())
 ```
 
-3.7. **Clean up unused imports**:
+4.7. **Clean up unused imports**:
 - Remove `LLMRunFrame` from the frames import
 - Remove `LLMContextAggregatorPair` import (no longer used directly)
 - Remove `LLMContext` if it's fully replaced by `llm.create_context_aggregator`
@@ -396,7 +513,7 @@ async def on_client_connected(transport, client):
 
 ### Verification
 1. `uv run python -c "from pipecat_flows import FlowManager; print('OK')"` -- dependency works
-2. `uv run python -c "from prompts.scheduling import create_greeting_node; print('OK')"` -- prompts module works
+2. `uv run python -c "from app.scheduling import create_greeting_node; print('OK')"` -- app module works
 3. `uv run bot.py` -- bot starts without errors
 4. Open `http://localhost:7860/client`, click Connect -- bot greets and asks for name + DOB
 5. Provide name + DOB -- bot acknowledges patient found, asks for date + time
@@ -404,76 +521,19 @@ async def on_client_connected(transport, client):
 
 ---
 
-## Phase 4: Make healthie.py functions async with dummy implementations
-
-**Files**: `healthie.py`
-
-### Context
-The current `find_patient` and `create_appointment` stubs are synchronous (`def`, not `async def`) with `pass` bodies that return `None`. We need to:
-1. Make them `async` so the pipecat-flows handlers can `await` them
-2. Add dummy implementations that return hardcoded data so the full conversation flow is testable end-to-end
-
-The dummy implementations will be replaced with real Healthie/Playwright calls in a future PR.
-
-### Steps
-
-4.1. Replace `find_patient` stub (line ~76) with a dummy async implementation:
-```python
-async def find_patient(name, date_of_birth):
-    """Look up a patient by name and date of birth.
-
-    Args:
-        name: The patient's full name.
-        date_of_birth: The patient's date of birth (YYYY-MM-DD).
-
-    Returns:
-        dict with patient_id, name, date_of_birth if found, or None.
-    """
-    # TODO: Replace with real Healthie lookup via Playwright
-    return {"patient_id": "dummy-123", "name": name, "date_of_birth": date_of_birth}
-```
-
-4.2. Replace `create_appointment` stub (line ~105) with a dummy async implementation:
-```python
-async def create_appointment(patient_id, date, time):
-    """Create an appointment for a patient.
-
-    Args:
-        patient_id: The patient's ID from find_patient.
-        date: The appointment date (YYYY-MM-DD).
-        time: The appointment time (HH:MM, 24-hour).
-
-    Returns:
-        dict with appointment_id, patient_id, date, time if created, or None.
-    """
-    # TODO: Replace with real Healthie appointment creation via Playwright
-    return {"appointment_id": "appt-456", "patient_id": patient_id, "date": date, "time": time}
-```
-
-### Design notes
-- The dummy implementations always succeed, which means the happy path (greeting → appointment → confirmation) is fully testable.
-- The return format serves as a **living contract** for what the real implementations must return -- the flow handlers depend on these keys (`patient_id`, `name`, `appointment_id`, etc.).
-- The `# TODO` comments make it clear these are placeholders.
-
-### Verification
-- `uv run python -c "import asyncio; from healthie import find_patient; print(asyncio.run(find_patient('Jane Doe', '1990-01-15')))"` returns `{'patient_id': 'dummy-123', 'name': 'Jane Doe', 'date_of_birth': '1990-01-15'}`
-- Full end-to-end test: start bot, connect via browser, provide name + DOB → bot finds patient → provide date + time → bot confirms appointment
+**Note**: `healthie.py` is unchanged in this plan. The dummy implementations live in `app/shared/tools/` (Phase 2). When real Healthie integration is needed, the tool files will import from `healthie.py` -- but that's a future PR.
 
 ---
 
 ## Phase 5: Add tests
 
-**Files**: `tests/__init__.py`, `tests/test_scheduling_flow.py`
+**Files**: `tests/app/scheduling/test_nodes.py`, `tests/app/scheduling/test_handlers.py`, `tests/app/shared/tools/test_find_patient.py`, `tests/app/shared/tools/test_create_appointment.py`
 
-### Context
-We need pytest tests that verify the conversation flow logic without requiring real AI services or a running bot. The tests focus on:
-- Node definitions return correct structure (task_messages, functions, post_actions)
-- Handler functions transition to the correct nodes based on healthie return values
-- FlowManager state is updated correctly by handlers
+Tests mirror the source layout for predictable discovery.
 
 ### Steps
 
-5.1. Add `pytest` as a dev dependency in `pyproject.toml`:
+5.1. Add `pytest` and `pytest-asyncio` as dev dependencies in `pyproject.toml`:
 ```toml
 [dependency-groups]
 dev = [
@@ -483,31 +543,27 @@ dev = [
 ]
 ```
 
-5.2. Create `tests/__init__.py` (empty).
+5.2. Create package files (all empty `__init__.py`):
+- `tests/__init__.py`
+- `tests/app/__init__.py`
+- `tests/app/scheduling/__init__.py`
+- `tests/app/shared/__init__.py`
+- `tests/app/shared/tools/__init__.py`
 
-5.3. Create `tests/test_scheduling_flow.py`:
-
+5.3. Create `tests/app/scheduling/test_nodes.py`:
 ```python
-"""Tests for the scheduling conversation flow."""
+"""Tests for scheduling flow node definitions."""
 
-import pytest
-
-from prompts.scheduling import (
-    ROLE_MESSAGES,
+from app.scheduling.nodes import (
     create_appointment_node,
     create_confirmation_node,
     create_greeting_node,
     create_patient_not_found_node,
-    handle_create_appointment,
-    handle_find_patient,
 )
+from app.scheduling.prompts import ROLE_MESSAGES
 
-
-# --- Node structure tests ---
 
 class TestNodeDefinitions:
-    """Verify each node returns the expected structure."""
-
     def test_greeting_node_has_role_and_task_messages(self):
         node = create_greeting_node()
         assert node["role_messages"] == ROLE_MESSAGES
@@ -525,7 +581,6 @@ class TestNodeDefinitions:
         assert node["functions"][0].name == "create_appointment"
 
     def test_appointment_node_has_no_role_messages(self):
-        """role_messages are only set in greeting; pipecat-flows persists them."""
         node = create_appointment_node()
         assert "role_messages" not in node
 
@@ -541,19 +596,23 @@ class TestNodeDefinitions:
         node = create_patient_not_found_node()
         assert len(node["functions"]) == 1
         assert node["functions"][0].name == "find_patient"
+```
 
+5.4. Create `tests/app/scheduling/test_handlers.py`:
+```python
+"""Tests for scheduling flow handler functions."""
 
-# --- Handler tests ---
+import pytest
+
+from app.scheduling.handlers import handle_create_appointment, handle_find_patient
+
 
 class FakeFlowManager:
-    """Minimal mock for FlowManager -- only needs .state dict."""
     def __init__(self):
         self.state = {}
 
 
 class TestHandleFindPatient:
-    """Test handle_find_patient transitions and state updates."""
-
     @pytest.mark.asyncio
     async def test_patient_found_transitions_to_appointment_node(self):
         fm = FakeFlowManager()
@@ -562,7 +621,6 @@ class TestHandleFindPatient:
         )
         assert "Jane Doe" in result_msg
         assert next_node is not None
-        # Should transition to appointment node (has create_appointment function)
         assert len(next_node["functions"]) == 1
         assert next_node["functions"][0].name == "create_appointment"
 
@@ -577,16 +635,15 @@ class TestHandleFindPatient:
 
     @pytest.mark.asyncio
     async def test_patient_not_found_transitions_to_not_found_node(self):
-        # This test will need updating when find_patient uses real Healthie
-        # For now with dummy implementation, patient is always found
-        # We test the handler logic by monkeypatching
-        import prompts.scheduling as scheduling
-        original = scheduling.find_patient
+        # Must patch the name in handlers module, not the source module,
+        # because handlers.py binds find_patient via `from ... import`.
+        import app.scheduling.handlers as handlers_module
+        original = handlers_module.find_patient
 
         async def fake_not_found(name, dob):
             return None
 
-        scheduling.find_patient = fake_not_found
+        handlers_module.find_patient = fake_not_found
         try:
             fm = FakeFlowManager()
             result_msg, next_node = await handle_find_patient(
@@ -596,12 +653,10 @@ class TestHandleFindPatient:
             assert next_node is not None
             assert next_node["functions"][0].name == "find_patient"
         finally:
-            scheduling.find_patient = original
+            handlers_module.find_patient = original
 
 
 class TestHandleCreateAppointment:
-    """Test handle_create_appointment transitions and state updates."""
-
     @pytest.mark.asyncio
     async def test_appointment_created_transitions_to_confirmation(self):
         fm = FakeFlowManager()
@@ -627,13 +682,15 @@ class TestHandleCreateAppointment:
 
     @pytest.mark.asyncio
     async def test_appointment_failed_stays_on_same_node(self):
-        import prompts.scheduling as scheduling
-        original = scheduling.create_appointment
+        # Must patch the name in handlers module, not the source module,
+        # because handlers.py binds create_appointment via `from ... import`.
+        import app.scheduling.handlers as handlers_module
+        original = handlers_module.create_appointment
 
         async def fake_fail(patient_id, date, time):
             return None
 
-        scheduling.create_appointment = fake_fail
+        handlers_module.create_appointment = fake_fail
         try:
             fm = FakeFlowManager()
             fm.state["patient_id"] = "dummy-123"
@@ -641,15 +698,54 @@ class TestHandleCreateAppointment:
                 {"date": "2026-04-01", "time": "10:00"}, fm
             )
             assert "sorry" in result_msg.lower()
-            assert next_node is None  # stays on current node
+            assert next_node is None
         finally:
-            scheduling.create_appointment = original
+            handlers_module.create_appointment = original
+```
+
+5.5. Create `tests/app/shared/tools/test_find_patient.py`:
+```python
+"""Tests for the find_patient tool."""
+
+import pytest
+
+from app.shared.tools import find_patient
+
+
+class TestFindPatient:
+    @pytest.mark.asyncio
+    async def test_dummy_always_returns_patient(self):
+        result = await find_patient("Jane Doe", "1990-01-15")
+        assert result is not None
+        assert result["patient_id"] == "dummy-123"
+        assert result["name"] == "Jane Doe"
+        assert result["date_of_birth"] == "1990-01-15"
+```
+
+5.6. Create `tests/app/shared/tools/test_create_appointment.py`:
+```python
+"""Tests for the create_appointment tool."""
+
+import pytest
+
+from app.shared.tools import create_appointment
+
+
+class TestCreateAppointment:
+    @pytest.mark.asyncio
+    async def test_dummy_always_returns_appointment(self):
+        result = await create_appointment("patient-123", "2026-04-01", "10:00")
+        assert result is not None
+        assert result["appointment_id"] == "appt-456"
+        assert result["patient_id"] == "patient-123"
+        assert result["date"] == "2026-04-01"
+        assert result["time"] == "10:00"
 ```
 
 ### Verification
 - `uv run pytest tests/ -v` -- all tests pass
-- Tests cover: node structure (7 tests), handler happy paths (4 tests), handler error paths (2 tests)
-- Total: ~13 tests
+- Tests cover: node structure (7), handler happy paths (4), handler error paths (2), tool contracts (2)
+- Total: ~15 tests
 
 ---
 
@@ -658,18 +754,29 @@ class TestHandleCreateAppointment:
 | File | Change | Lines |
 |------|--------|-------|
 | `pyproject.toml` | Add `pipecat-ai-flows`, `pytest`, `pytest-asyncio` | ~3 |
-| `prompts/__init__.py` | New empty file | 0 |
-| `prompts/scheduling.py` | New file: nodes, prompts, handlers | ~150 |
+| `app/__init__.py` | New empty file | 0 |
+| `app/scheduling/__init__.py` | New: exports `create_greeting_node` | ~2 |
+| `app/scheduling/prompts.py` | New: system messages and task prompts | ~40 |
+| `app/scheduling/nodes.py` | New: node factories + tool schemas | ~80 |
+| `app/scheduling/handlers.py` | New: handler functions (calls shared tools) | ~50 |
+| `app/shared/__init__.py` | New empty file | 0 |
+| `app/shared/tools/__init__.py` | New: re-exports tool functions | ~3 |
+| `app/shared/tools/find_patient.py` | New: patient lookup (dummy impl) | ~20 |
+| `app/shared/tools/create_appointment.py` | New: appointment creation (dummy impl) | ~20 |
 | `bot.py` | Wire FlowManager, remove old prompt | ~20 |
-| `healthie.py` | Make async + dummy implementations | ~10 |
-| `tests/__init__.py` | New empty file | 0 |
-| `tests/test_scheduling_flow.py` | New file: node + handler tests | ~130 |
+| `tests/app/scheduling/test_nodes.py` | New: node structure tests | ~40 |
+| `tests/app/scheduling/test_handlers.py` | New: handler transition tests | ~80 |
+| `tests/app/shared/tools/test_find_patient.py` | New: tool contract tests | ~15 |
+| `tests/app/shared/tools/test_create_appointment.py` | New: tool contract tests | ~15 |
 
-**Total new code**: ~280 lines (prompts/scheduling.py + tests)
-**Total modified code**: ~30 lines across bot.py + healthie.py + pyproject.toml
+**Total new code**: ~370 lines (app + tests)
+**Total modified code**: ~23 lines across bot.py + pyproject.toml
+**healthie.py**: unchanged
 
 ## Resolved Questions
 
-1. **FlowManager `context_aggregator` parameter**: RESOLVED. Must pass the full `LLMContextAggregatorPair` object returned by `llm.create_context_aggregator(context)`. FlowManager internally inspects the type and creates a `UniversalLLMAdapter`. Updated Phase 3 accordingly.
+1. **FlowManager `context_aggregator` parameter**: RESOLVED. Must pass the full `LLMContextAggregatorPair` object returned by `llm.create_context_aggregator(context)`. FlowManager internally inspects the type and creates a `UniversalLLMAdapter`. Updated Phase 4 accordingly.
 2. **`post_actions: end_conversation`**: RESOLVED. This is a built-in action type in pipecat-flows. No registration needed. It fires after the LLM response and TTS finish, cleanly ending the session.
-3. **Healthie function return format**: RESOLVED. Dummy implementations define the contract explicitly. Handlers depend on `patient_id`, `name` from find_patient and `appointment_id`, `patient_id`, `date`, `time` from create_appointment.
+3. **Healthie function return format**: RESOLVED. Dummy implementations in `app/shared/tools/` define the contract explicitly. Handlers depend on `patient_id`, `name` from find_patient and `appointment_id`, `patient_id`, `date`, `time` from create_appointment.
+4. **Code structure**: RESOLVED. `app/scheduling/` contains flow files directly (prompts, nodes, handlers). Shared tools live in `app/shared/tools/` for reuse across flows. Dependency chain: `app.scheduling` → `app.shared.tools` → `healthie.py` (future). Initial exploration in brainstorm `thoughts/shared/brainstorms/2026-03-27-code-structure.md` (note: brainstorm reflects an earlier iteration; this plan is authoritative).
+5. **Circular imports between nodes and handlers**: RESOLVED. `nodes.py` imports handlers at module level; `handlers.py` uses late imports (inside function body) for node factories. This breaks the cycle cleanly.
