@@ -188,13 +188,13 @@ Implement `find_patient(name, dob)` using the Playwright client to search for pa
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Linting passes: `uv run ruff check app/shared/tools/find_patient.py`
-- [ ] Import works: `uv run python -c "from app.shared.tools import find_patient; print('OK')"`
+- [x] Linting passes: `uv run ruff check app/shared/tools/find_patient.py`
+- [x] Import works: `uv run python -c "from app.shared.tools import find_patient; print('OK')"`
 
 #### Manual Verification:
-- [ ] Run `uv run python scripts/test_find_patient.py` with a known patient name → returns patient dict with correct ID
-- [ ] Run with a non-existent patient name → returns `None`
-- [ ] The function signature is unchanged (handlers.py still works)
+- [x] Run `uv run python scripts/test_find_patient.py` with a known patient name → returns patient dict with correct ID
+- [x] Run with a non-existent patient name → returns `None`
+- [x] The function signature is unchanged (handlers.py still works)
 
 **Implementation Note**: After completing this phase, pause for manual confirmation of patient search. Create commit after verification passes.
 

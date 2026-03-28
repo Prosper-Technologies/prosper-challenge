@@ -98,24 +98,18 @@ class HealthiePlaywrightClient:
 
         # Step 3 — handle passkey / MFA prompt ("Continue to app")
         try:
-            continue_link = page.locator('a:has-text("Continue to app")')
-            await continue_link.wait_for(state="visible", timeout=10000)
-            await continue_link.click()
+            continue_button = page.locator('button:has-text("Continue to app")')
+            await continue_button.wait_for(state="visible", timeout=10000)
+            await continue_button.click()
             logger.info("Dismissed passkey prompt")
         except Exception:
             logger.debug("No passkey prompt detected — continuing")
 
-        # Step 4 — wait for the dashboard (loading spinner disappears)
-        try:
-            spinner = page.locator(".loading-spinner")
-            await spinner.wait_for(state="hidden", timeout=30000)
-        except Exception:
-            logger.debug("No loading spinner found — assuming dashboard loaded")
-
-        # Verify we left the sign-in page
-        await page.wait_for_timeout(2000)
-        if "sign_in" in page.url:
-            raise RuntimeError("Login failed — still on the sign-in page")
+        # Step 4 — wait for navigation away from login pages
+        await page.wait_for_url(
+            lambda url: "sign_in" not in url and "/account/login" not in url,
+            timeout=30000,
+        )
 
         # Persist session state
         AUTH_DIR.mkdir(parents=True, exist_ok=True)
@@ -142,7 +136,7 @@ class HealthiePlaywrightClient:
             await page.goto(BASE_URL, wait_until="domcontentloaded")
             await page.wait_for_timeout(3000)
 
-            if "sign_in" in page.url:
+            if "sign_in" in page.url or "/account/login" in page.url:
                 logger.warning("Saved session expired — will perform fresh login")
                 await self.close()
                 return None
