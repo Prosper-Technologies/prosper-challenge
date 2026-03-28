@@ -1,5 +1,15 @@
 # Solution: Decision Log
 
+## Description
+
+A voice agent for scheduling appointments with Healthie-based healthcare providers. The bot is built with [Pipecat](https://github.com/pipecat-ai/pipecat) and [pipecat-flows](https://github.com/pipecat-ai/pipecat-flows), which models the conversation as a directed graph of nodes. Each node scopes a specific step in the flow and exposes only the tools relevant to that step.
+
+The scheduling flow is sequential: the bot first collects the patient's name and date of birth, looks them up via the Healthie GraphQL API, then — if found — collects appointment preferences and creates the appointment. Conversation state transitions are driven by function calls that the LLM makes when it has gathered the required information for each node.
+
+Backend integrations live in `app/integrations/` (Healthie API client) and are exposed to the flow layer through tool wrappers in `app/shared/tools/`, keeping the conversation logic decoupled from the specific EHR backend.
+
+---
+
 Architecture decisions for the appointment scheduling voice agent, recorded as they were made.
 
 ---
@@ -40,7 +50,7 @@ Architecture decisions for the appointment scheduling voice agent, recorded as t
 
 **Staging environment note**: We use Healthie's staging environment because the API (`staging-api.gethealthie.com/graphql`) is freely available in the staging/sandbox environment. In production, API access requires a paid plan. This is sufficient for development and demonstration; a production deployment would switch to the production API endpoint with a paid API key.
 
-Note that the Playwright functions remain in the codebase as a fallback and as documentation of the UI-based approach.
+Note that the Playwright functions remain in the codebase as documentation of the UI-based approach. They could be used as fallback mechanisms if necessary.
 
 ---
 
@@ -64,9 +74,9 @@ Note that the Playwright functions remain in the codebase as a fallback and as d
 
 ---
 
-## 6. E2E integration test scripts instead of unit tests
+## 6. E2E integration test scripts instead of unit tests (for Playwright flows only)
 
-**Decision**: Provide manual integration test scripts (`scripts/test_find_patient_playwright.py`, `scripts/test_create_appointment_playwright.py`, `scripts/test_e2e_flow.py`) that run against Healthie staging. No unit tests with mocked Playwright.
+**Decision**: Provide manual integration test scripts (`scripts/test_find_patient_playwright.py`, `scripts/test_create_appointment_playwright.py`, `scripts/test_e2e_flow.py`) that run against Healthie. No unit tests with mocked Playwright.
 
 **Alternative**: Unit tests that mock Playwright's page/locator objects to verify the automation logic in isolation.
 
