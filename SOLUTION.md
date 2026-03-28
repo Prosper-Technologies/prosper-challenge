@@ -68,6 +68,16 @@ Architecture decisions for the appointment scheduling voice agent, recorded as t
 
 ---
 
+## 8. Pre-commit hooks for ruff and mypy
+
+**Decision**: Add pre-commit hooks that run ruff (lint + format) and mypy (type checking) on every commit.
+
+**Alternative**: Rely on CI-only checks or manual linting before pushing.
+
+**Tradeoff**: Pre-commit hooks catch lint and type errors before they enter the git history, giving instant feedback without waiting for a CI round-trip. The cost is a small delay on each commit (~1-2 seconds for incremental checks) and requiring developers to run `uv run pre-commit install` after cloning. This is worth it because fixing issues at commit time is cheaper than fixing them after review feedback or a failed CI run.
+
+---
+
 ## 7. E2E integration test scripts instead of unit tests
 
 **Decision**: Provide manual integration test scripts (`scripts/test_find_patient.py`, `scripts/test_create_appointment.py`, `scripts/test_e2e_flow.py`) that run against Healthie staging. No unit tests with mocked Playwright.
