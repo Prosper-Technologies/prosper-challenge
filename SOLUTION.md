@@ -55,3 +55,23 @@ Architecture decisions for the appointment scheduling voice agent, recorded as t
 **Alternative**: Handlers call `healthie.find_patient()` / `healthie.create_appointment()` directly.
 
 **Tradeoff**: Direct Healthie coupling means swapping to another EHR requires changing the flow layer. With tools as an abstraction boundary, the backend is an implementation detail -- swap Healthie for another service by changing the tool files, not the conversation flow. The dummy implementations also enable end-to-end testing of the full flow without a running Healthie instance.
+
+---
+
+## 6. Playwright session persistence via storage_state
+
+**Decision**: Persist browser session cookies to `auth/healthie_state.json` using Playwright's `storage_state` API. On startup, attempt to restore the saved session before falling back to a fresh login.
+
+**Alternative**: In-memory only -- reuse the browser/page within a single process lifecycle but re-login on every restart.
+
+**Tradeoff**: Healthie's login flow is multi-step (email → submit → password → submit → passkey prompt → "Continue to app") and takes 10-15 seconds. For a voice agent where latency matters, paying that cost on every process restart degrades the first caller's experience. `storage_state` serializes cookies and local storage to disk so subsequent startups skip login entirely -- until the session expires, at which point the client detects the redirect to the login page and re-authenticates automatically. The cost is a file on disk containing session tokens, which we mitigate by gitignoring the `auth/` directory. This is acceptable for a staging environment; a production deployment would use a secrets manager instead.
+
+---
+
+## 7. E2E integration test scripts instead of unit tests
+
+**Decision**: Provide manual integration test scripts (`scripts/test_find_patient.py`, `scripts/test_create_appointment.py`, `scripts/test_e2e_flow.py`) that run against Healthie staging. No unit tests with mocked Playwright.
+
+**Alternative**: Unit tests that mock Playwright's page/locator objects to verify the automation logic in isolation.
+
+**Tradeoff**: The value of these tools is that they interact correctly with Healthie's real UI -- the exact selectors, the SPA loading behavior, the multi-step login. Mocking Playwright would test that our code calls `.fill()` and `.click()` in the right order, but wouldn't catch the failures that actually matter: a selector changing after a Healthie deploy, a new loading spinner, or a form field being renamed. Mocked tests pass when the mock matches our assumptions; they fail to catch when our assumptions no longer match reality. E2E scripts against staging catch exactly those regressions. The cost is that tests require network access and a valid staging account, making them unsuitable for CI -- but for browser automation tools, that tradeoff is correct.

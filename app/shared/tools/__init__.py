@@ -1,2 +1,2 @@
-from .find_patient import find_patient
-from .create_appointment import create_appointment
+from .create_appointment import create_appointment_playwright
+from .find_patient import find_patient_playwright

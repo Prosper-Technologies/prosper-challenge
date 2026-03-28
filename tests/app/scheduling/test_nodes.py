@@ -25,7 +25,7 @@ class TestNodeDefinitions:
     def test_collect_dob_node_has_find_patient_function(self):
         node = create_collect_dob_node()
         assert len(node["functions"]) == 1
-        assert node["functions"][0].name == "find_patient"
+        assert node["functions"][0].name == "find_patient_playwright"
 
     def test_collect_dob_node_has_no_role_messages(self):
         node = create_collect_dob_node()
@@ -34,7 +34,7 @@ class TestNodeDefinitions:
     def test_appointment_node_has_create_appointment_function(self):
         node = create_appointment_node()
         assert len(node["functions"]) == 1
-        assert node["functions"][0].name == "create_appointment"
+        assert node["functions"][0].name == "create_appointment_playwright"
 
     def test_confirmation_node_has_no_functions(self):
         node = create_confirmation_node()

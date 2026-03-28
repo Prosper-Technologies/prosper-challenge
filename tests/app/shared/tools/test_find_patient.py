@@ -1,14 +1,14 @@
-"""Tests for the find_patient tool."""
+"""Tests for the find_patient_playwright tool."""
 
 import pytest
 
-from app.shared.tools import find_patient
+from app.shared.tools import find_patient_playwright
 
 
 class TestFindPatient:
     @pytest.mark.asyncio
     async def test_dummy_always_returns_patient(self):
-        result = await find_patient("Jane Doe", "1990-01-15")
+        result = await find_patient_playwright("Jane Doe", "1990-01-15")
         assert result is not None
         assert result["patient_id"] == "dummy-123"
         assert result["name"] == "Jane Doe"

@@ -6,7 +6,7 @@ tools from the tools layer and return (message, next_node) tuples.
 
 from pipecat_flows import FlowArgs, FlowManager
 
-from app.shared.tools import find_patient, create_appointment
+from app.shared.tools import create_appointment_playwright, find_patient_playwright
 
 
 async def handle_collect_name(args: FlowArgs, flow_manager: FlowManager):
@@ -29,7 +29,7 @@ async def handle_find_patient(args: FlowArgs, flow_manager: FlowManager):
     name = flow_manager.state["patient_name"]
     date_of_birth = args["date_of_birth"]
 
-    result = await find_patient(name, date_of_birth)
+    result = await find_patient_playwright(name, date_of_birth)
 
     if result:
         flow_manager.state["patient_id"] = result["patient_id"]
@@ -53,7 +53,7 @@ async def handle_create_appointment(args: FlowArgs, flow_manager: FlowManager):
     date = args["date"]
     time = args["time"]
 
-    result = await create_appointment(patient_id, date, time)
+    result = await create_appointment_playwright(patient_id, date, time)
 
     if result:
         flow_manager.state["appointment"] = result

@@ -23,7 +23,7 @@ class TestHandleCollectName:
         assert fm.state["patient_name"] == "Jane Doe"
         assert next_node is not None
         assert len(next_node["functions"]) == 1
-        assert next_node["functions"][0].name == "find_patient"
+        assert next_node["functions"][0].name == "find_patient_playwright"
 
 
 class TestHandleFindPatient:
@@ -37,7 +37,7 @@ class TestHandleFindPatient:
         assert "Jane Doe" in result_msg
         assert next_node is not None
         assert len(next_node["functions"]) == 1
-        assert next_node["functions"][0].name == "create_appointment"
+        assert next_node["functions"][0].name == "create_appointment_playwright"
 
     @pytest.mark.asyncio
     async def test_patient_found_updates_state(self):
@@ -52,12 +52,12 @@ class TestHandleFindPatient:
     @pytest.mark.asyncio
     async def test_patient_not_found_transitions_to_not_found_node(self):
         import app.scheduling.handlers as handlers_module
-        original = handlers_module.find_patient
+        original = handlers_module.find_patient_playwright
 
         async def fake_not_found(name, dob):
             return None
 
-        handlers_module.find_patient = fake_not_found
+        handlers_module.find_patient_playwright = fake_not_found
         try:
             fm = FakeFlowManager()
             fm.state["patient_name"] = "Nobody"
@@ -68,7 +68,7 @@ class TestHandleFindPatient:
             assert next_node is not None
             assert next_node["functions"][0].name == "collect_name"
         finally:
-            handlers_module.find_patient = original
+            handlers_module.find_patient_playwright = original
 
 
 class TestHandleCreateAppointment:
@@ -100,12 +100,12 @@ class TestHandleCreateAppointment:
         # Must patch the name in handlers module, not the source module,
         # because handlers.py binds create_appointment via `from ... import`.
         import app.scheduling.handlers as handlers_module
-        original = handlers_module.create_appointment
+        original = handlers_module.create_appointment_playwright
 
         async def fake_fail(patient_id, date, time):
             return None
 
-        handlers_module.create_appointment = fake_fail
+        handlers_module.create_appointment_playwright = fake_fail
         try:
             fm = FakeFlowManager()
             fm.state["patient_id"] = "dummy-123"
@@ -115,4 +115,4 @@ class TestHandleCreateAppointment:
             assert "sorry" in result_msg.lower()
             assert next_node is None
         finally:
-            handlers_module.create_appointment = original
+            handlers_module.create_appointment_playwright = original
