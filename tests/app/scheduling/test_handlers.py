@@ -30,7 +30,7 @@ class TestHandleCollectName:
 
 class TestHandleFindPatient:
     @pytest.mark.asyncio
-    @patch("app.scheduling.handlers.find_patient_api", new_callable=AsyncMock)
+    @patch("app.scheduling.handlers.find_patient", new_callable=AsyncMock)
     async def test_patient_found_transitions_to_appointment_node(self, mock_find):
         mock_find.return_value = {
             "patient_id": "dummy-123",
@@ -46,7 +46,7 @@ class TestHandleFindPatient:
         assert next_node["functions"][0].name == "create_appointment_playwright"
 
     @pytest.mark.asyncio
-    @patch("app.scheduling.handlers.find_patient_api", new_callable=AsyncMock)
+    @patch("app.scheduling.handlers.find_patient", new_callable=AsyncMock)
     async def test_patient_found_updates_state(self, mock_find):
         mock_find.return_value = {
             "patient_id": "dummy-123",
@@ -60,7 +60,7 @@ class TestHandleFindPatient:
         assert fm.state["patient_name"] == "Jane Doe"
 
     @pytest.mark.asyncio
-    @patch("app.scheduling.handlers.find_patient_api", new_callable=AsyncMock)
+    @patch("app.scheduling.handlers.find_patient", new_callable=AsyncMock)
     async def test_patient_not_found_transitions_to_not_found_node(self, mock_find):
         mock_find.return_value = None
         fm = FakeFlowManager()
@@ -73,7 +73,7 @@ class TestHandleFindPatient:
 
 class TestHandleCreateAppointment:
     @pytest.mark.asyncio
-    @patch("app.scheduling.handlers.create_appointment_api", new_callable=AsyncMock)
+    @patch("app.scheduling.handlers.create_appointment", new_callable=AsyncMock)
     async def test_appointment_created_transitions_to_confirmation(self, mock_create):
         mock_create.return_value = {
             "appointment_id": "appt-456",
@@ -93,7 +93,7 @@ class TestHandleCreateAppointment:
         assert next_node["post_actions"] == [{"type": "end_conversation"}]
 
     @pytest.mark.asyncio
-    @patch("app.scheduling.handlers.create_appointment_api", new_callable=AsyncMock)
+    @patch("app.scheduling.handlers.create_appointment", new_callable=AsyncMock)
     async def test_appointment_created_updates_state(self, mock_create):
         mock_create.return_value = {
             "appointment_id": "appt-456",
@@ -108,7 +108,7 @@ class TestHandleCreateAppointment:
         assert fm.state["appointment"]["date"] == "2026-04-01"
 
     @pytest.mark.asyncio
-    @patch("app.scheduling.handlers.create_appointment_api", new_callable=AsyncMock)
+    @patch("app.scheduling.handlers.create_appointment", new_callable=AsyncMock)
     async def test_appointment_failed_stays_on_same_node(self, mock_create):
         mock_create.return_value = None
         fm = FakeFlowManager()
