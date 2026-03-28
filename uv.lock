@@ -2502,6 +2502,7 @@ name = "prosper-challenge"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "httpx" },
     { name = "pipecat-ai", extra = ["daily", "elevenlabs", "local-smart-turn-v3", "openai", "runner", "silero", "webrtc"] },
     { name = "pipecat-ai-cli" },
     { name = "pipecat-ai-flows" },
@@ -2520,6 +2521,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "httpx" },
     { name = "pipecat-ai", extras = ["webrtc", "daily", "silero", "elevenlabs", "openai", "local-smart-turn-v3", "runner"] },
     { name = "pipecat-ai-cli" },
     { name = "pipecat-ai-flows" },

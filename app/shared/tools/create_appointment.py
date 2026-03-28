@@ -181,7 +181,7 @@ async def create_appointment_api(patient_id: str, date: str, time: str) -> dict 
     mutation CreateAppointment(
       $appointment_type_id: String
       $datetime: String
-      $attendee_ids: [String]
+      $attendee_ids: String
     ) {
       createAppointment(input: {
         appointment_type_id: $appointment_type_id
@@ -191,8 +191,6 @@ async def create_appointment_api(patient_id: str, date: str, time: str) -> dict 
         appointment {
           id
           date
-          start_time
-          end_time
         }
         messages {
           field
@@ -205,7 +203,7 @@ async def create_appointment_api(patient_id: str, date: str, time: str) -> dict 
     variables = {
         "appointment_type_id": appointment_type_id,
         "datetime": dt_string,
-        "attendee_ids": [patient_id],
+        "attendee_ids": patient_id,
     }
 
     try:

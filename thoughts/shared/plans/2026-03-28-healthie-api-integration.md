@@ -193,3 +193,32 @@ mutation CreateAppointment(
 | GraphQL schema may differ from docs | Validate actual response shapes in test scripts |
 | Appointment type query may return empty | Log error and return `None` gracefully |
 | DOB format from API may differ from UI | Reuse existing `_normalize_date()` which handles multiple formats |
+
+## Review Errata
+
+_Reviewed: 2026-03-28_
+
+### Critical
+
+_(none)_
+
+### Important
+
+- [ ] **No "What We're NOT Doing" section** — The plan template expects an explicit scope exclusion section to guard against scope creep. While no creep occurred, adding this section (even retroactively) documents decisions like: not removing Playwright dependency, not adding unit tests with mocks, not adding environment-based switching between API/Playwright.
+- [ ] **Appointment types queried on every call** — `create_appointment_api` fetches appointment types from the API on every invocation. For a voice agent handling multiple appointments in one session, this adds unnecessary latency. Consider caching the first type ID on the client singleton.
+- [ ] **No Quick Verification Reference section** — Plan template expects a consolidated section listing all verification commands in one place for fast re-runs.
+
+### Minor
+
+- [ ] **Frontmatter missing `planner` field** — Plan template expects a `planner:` field in YAML frontmatter. Not blocking but useful for attribution.
+- [ ] **Acceptance criteria vs. Automated/Manual Verification** — Plan phases use "Acceptance criteria" instead of the template's expected split into "Automated Verification" and "Manual Verification" subsections. The criteria are clear regardless.
+- [ ] **Test script uses `dotenv` without direct dependency** — `python-dotenv` is available transitively (via `pydantic-settings`) but not declared in `pyproject.toml`. Works today but could break if upstream removes the dependency. Low risk since these are scripts, not production code.
+
+### Resolved
+
+- [x] All 12 acceptance criteria items checked off
+- [x] All 8 planned files match actual git diff
+- [x] `ruff check` and `ruff format` pass on all changed files
+- [x] `mypy` errors are pre-existing (`pipecat_flows` stubs), unrelated to this work
+- [x] Handlers correctly import and call `_api` functions
+- [x] Playwright functions remain importable for fallback
