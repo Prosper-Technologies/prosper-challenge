@@ -231,3 +231,17 @@ async def create_appointment_api(patient_id: str, date: str, time: str) -> dict 
         "date": date,
         "time": time,
     }
+
+
+async def create_appointment(patient_id: str, date: str, time: str) -> dict | None:
+    """Create an appointment for a patient.
+
+    Args:
+        patient_id: The patient's ID from find_patient.
+        date: The appointment date (YYYY-MM-DD).
+        time: The appointment time (HH:MM, 24-hour).
+
+    Returns:
+        dict with appointment_id, patient_id, date, time if created, or None.
+    """
+    return await create_appointment_api(patient_id, date, time)

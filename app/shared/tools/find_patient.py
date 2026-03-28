@@ -208,3 +208,16 @@ async def find_patient_api(name: str, date_of_birth: str) -> dict | None:
 
     logger.info(f"No patient matched DOB {date_of_birth} for name: {name}")
     return None
+
+
+async def find_patient(name: str, date_of_birth: str) -> dict | None:
+    """Look up a patient by name and date of birth.
+
+    Args:
+        name: The patient's full name.
+        date_of_birth: The patient's date of birth (YYYY-MM-DD).
+
+    Returns:
+        dict with patient_id, name, date_of_birth if found, or None.
+    """
+    return await find_patient_api(name, date_of_birth)
