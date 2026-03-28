@@ -66,8 +66,18 @@ Note that the Playwright functions remain in the codebase as a fallback and as d
 
 ## 6. E2E integration test scripts instead of unit tests
 
-**Decision**: Provide manual integration test scripts (`scripts/test_find_patient.py`, `scripts/test_create_appointment.py`, `scripts/test_e2e_flow.py`) that run against Healthie staging. No unit tests with mocked Playwright.
+**Decision**: Provide manual integration test scripts (`scripts/test_find_patient_playwright.py`, `scripts/test_create_appointment_playwright.py`, `scripts/test_e2e_flow.py`) that run against Healthie staging. No unit tests with mocked Playwright.
 
 **Alternative**: Unit tests that mock Playwright's page/locator objects to verify the automation logic in isolation.
 
 **Tradeoff**: The value of these tools is that they interact correctly with Healthie's real UI -- the exact selectors, the SPA loading behavior, the multi-step login. Mocking Playwright would test that our code calls `.fill()` and `.click()` in the right order, but wouldn't catch the failures that actually matter: a selector changing after a Healthie deploy, a new loading spinner, or a form field being renamed. Mocked tests pass when the mock matches our assumptions; they fail to catch when our assumptions no longer match reality. E2E scripts against staging catch exactly those regressions. The cost is that tests require network access and a valid staging account, making them unsuitable for CI -- but for browser automation tools, that tradeoff is correct.
+
+---
+
+## 7. GitHub Actions CI pipeline
+
+**Decision**: Add a GitHub Actions workflow (`.github/workflows/ci.yml`) that runs lint, type checking, and unit tests on every push to `main` and on every pull request.
+
+**Alternative**: Rely solely on pre-commit hooks and manual local testing.
+
+**Tradeoff**: Pre-commit hooks catch issues locally but are easily bypassed (`--no-verify`) and don't run in all environments (e.g., GitHub web editor, merge commits). CI provides a shared, authoritative gate that blocks merges when checks fail. The workflow runs two parallel jobs -- `lint` (ruff + mypy) and `test` (pytest) -- so feedback is fast. We intentionally exclude the E2E integration scripts (`scripts/test_*.py`) from CI since they require network access to Healthie staging and valid credentials; only the unit tests in `tests/` run in CI. The cost is GitHub Actions minutes, which are free for public repos and generous for private ones.
