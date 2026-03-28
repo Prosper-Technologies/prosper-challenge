@@ -1,7 +1,7 @@
 ---
 date: 2026-03-28T12:00:00Z
 topic: "Healthie API Integration"
-status: in-progress
+status: completed
 autonomy: critical
 ---
 
@@ -156,8 +156,8 @@ mutation CreateAppointment(
 - No changes to `nodes.py`, `prompts.py`, or the flow structure — signatures are identical
 
 **Acceptance criteria**:
-- [ ] Bot flow uses API functions instead of Playwright
-- [ ] Playwright functions remain importable (not deleted) for fallback
+- [x] Bot flow uses API functions instead of Playwright
+- [x] Playwright functions remain importable (not deleted) for fallback
 
 ### Phase 5: Add test scripts
 
@@ -169,8 +169,8 @@ mutation CreateAppointment(
 - Print results to stdout for manual verification
 
 **Acceptance criteria**:
-- [ ] `test_find_patient_api.py` runs and finds/doesn't find patients correctly
-- [ ] `test_create_appointment_api.py` runs and creates an appointment
+- [x] `test_find_patient_api.py` runs and finds/doesn't find patients correctly
+- [x] `test_create_appointment_api.py` runs and creates an appointment
 
 ## Files Changed Summary
 
