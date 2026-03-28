@@ -20,7 +20,7 @@ Architecture decisions for the appointment scheduling voice agent, recorded as t
 
 **Alternative**: Plain Pipecat function calling with `register_function` and a single system prompt.
 
-**Tradeoff**: Plain function calling exposes all tools at every step, relying on the system prompt to enforce ordering. The LLM can skip steps or call functions in the wrong order, and adding steps means rewriting the prompt. pipecat-flows gives structural guarantees: each node scopes which tools are visible, so ordering bugs are impossible. The cost is an extra dependency and a small learning curve -- worth it because prompt engineering can't guarantee correctness.
+**Tradeoff**: Plain function calling exposes all tools at every step, relying on the system prompt to enforce ordering. The LLM can skip steps or call functions in the wrong order, and adding steps means rewriting the prompt. pipecat-flows gives structural guarantees: each node scopes which tools are visible, so ordering bugs are impossible. The cost is an extra dependency and a small learning curve -- worth it because prompt engineering can't guarantee correctness. One caveat we are assuming is that pipecat flows are less flexible for free-form conversation — harder to handle "I want to go back and change my name"
 
 ---
 
