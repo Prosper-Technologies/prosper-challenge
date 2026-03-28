@@ -21,6 +21,10 @@ dev = [
     "ruff>=0.12.11,<1",
 ]
 
+[tool.mypy]
+exclude = ["scripts/"]
+ignore_missing_imports = true
+
 [tool.ruff]
 line-length = 100
 [tool.ruff.lint]
