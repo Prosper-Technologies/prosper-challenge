@@ -91,3 +91,35 @@ Note that the Playwright functions remain in the codebase as documentation of th
 **Alternative**: Rely solely on pre-commit hooks and manual local testing.
 
 **Tradeoff**: Pre-commit hooks catch issues locally but are easily bypassed (`--no-verify`) and don't run in all environments (e.g., GitHub web editor, merge commits). CI provides a shared, authoritative gate that blocks merges when checks fail. The workflow runs two parallel jobs -- `lint` (ruff + mypy) and `test` (pytest) -- so feedback is fast. We intentionally exclude the E2E integration scripts (`scripts/test_*.py`) from CI since they require network access to Healthie staging and valid credentials; only the unit tests in `tests/` run in CI. The cost is GitHub Actions minutes, which are free for public repos and generous for private ones.
+
+---
+
+## Future Enhancements
+
+The following improvements have been identified across three areas — latency, reliability, and evaluation — to move the agent toward production readiness with real patients.
+
+### Latency
+
+- **Pipeline instrumentation**: Add per-stage timing (STT, LLM time-to-first-token, tool execution, TTS) with structured logging. This is a prerequisite for all other latency work — you can't optimize what you can't measure.
+- **LLM provider benchmarking**: Test alternatives (Claude, Gemini, Groq, Together AI) on our actual prompts. Measure time-to-first-token and total latency. Some providers with open models can be significantly faster for straightforward function-calling tasks.
+- **Prefetch appointment slots**: When a patient is found, proactively fetch available slots before the user asks. Cache them so the appointment creation step responds faster.
+- **Per-node model selection**: Use a faster/cheaper model for straightforward nodes (greeting, confirmation) and a more capable model for complex ones (patient lookup, appointment scheduling). Pipecat supports swapping services per node.
+- **Filler speech during tool execution**: While waiting for Healthie API calls, play natural filler ("Let me look that up for you...") to mask perceived latency without changing actual speed.
+
+### Reliability
+
+- **LLM provider failover via OpenRouter**: Use [OpenRouter](https://openrouter.ai) as a unified LLM gateway instead of building a custom failover proxy. OpenRouter provides an OpenAI-compatible API (drop-in replacement for Pipecat's `OpenAILLMService` — just change the base URL and API key) and handles failover automatically: specify an ordered list of fallback models, and if the primary provider is down or rate-limited, traffic routes to the next. It also translates OpenAI-format function-calling schemas to other providers, removing the main complexity of multi-provider support. As a latency bonus, OpenRouter offers routing variants like `:nitro` (optimize for speed) and `:exacto` (optimize for tool-calling reliability), which can improve both response time and function-calling accuracy.
+- **STT/TTS failover**: Configure backup STT (e.g., Deepgram) and TTS (e.g., Google Cloud TTS) services, switching automatically if ElevenLabs errors or latency exceeds a threshold.
+- **Healthie API retry with backoff**: Add retry logic with exponential backoff for transient Healthie API failures before surfacing errors to the user.
+- **Healthie API → Playwright fallback**: If the GraphQL API is down, fall back to the Playwright browser automation (already implemented, slower but functional). Detect via consecutive API errors.
+- **Graceful degradation with human handoff**: When all automated options are exhausted, transfer to a human operator or take a voicemail instead of leaving the caller stranded.
+
+### Evaluation
+
+- **Conversation logging**: Log full conversation transcripts (user utterances, bot responses, tool calls, state transitions) in structured format. Foundation for all other evaluation work.
+- **LLM-simulated caller framework**: Build a test harness where an LLM plays the patient with configurable personas (confused, impatient, wrong DOB, changes mind on time). Run text-only against the flow logic for fast iteration.
+- **LLM-as-judge scoring**: After each test conversation, have a separate LLM evaluate the transcript against a rubric: task completion, naturalness, error recovery, information accuracy, turn efficiency.
+- **End-to-end outcome verification**: After a simulated call, check Healthie to confirm the appointment was actually created with the correct patient, time, and provider.
+- **Latency regression alerts**: Track P50/P95/P99 per-stage latency over time and alert if any stage degrades beyond baseline thresholds. Depends on pipeline instrumentation.
+- **Conversation flow coverage tracking**: Track which pipecat-flows nodes and paths are exercised by tests, identifying untested branches like error recovery or appointment conflicts.
+- **CI-integrated eval suite**: Run simulated conversations on every deploy or PR, reporting pass/fail rate, task completion, and latency metrics. Gate deployments on eval results.
