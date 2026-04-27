@@ -74,6 +74,39 @@ uv run bot.py
 
 > 💡 First run note: The initial startup may take ~20 seconds as Pipecat downloads required models and imports.
 
+### Running Tests
+
+Run the full local test suite:
+
+```bash
+uv run python -m unittest discover -s tests -v
+```
+
+Run only the unit tests:
+
+```bash
+uv run python -m unittest tests.test_healthie -v
+```
+
+Run only the live Healthie integration tests:
+
+```bash
+uv run python -m unittest tests.test_healthie_integration -v
+```
+
+Run a single test class:
+
+```bash
+uv run python -m unittest tests.test_healthie.CreateAppointmentTests -v
+```
+
+Run a single test method:
+
+```bash
+uv run python -m unittest tests.test_healthie.CreateAppointmentTests.test_create_appointment_fills_form_and_returns_graphql_data -v
+```
+
+> ⚠️ The live Healthie integration tests create real appointments in the test account.
 
 
 ## Expectations & Deliverables
