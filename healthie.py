@@ -41,33 +41,53 @@ async def login_to_healthie() -> Page:
 
     logger.info("Logging into Healthie...")
     playwright = await async_playwright().start()
-    _browser = await playwright.chromium.launch(headless=True)
+    _browser = await playwright.chromium.launch(headless=False)
     _page = await _browser.new_page()
 
-    await _page.goto("https://secure.gethealthie.com/users/sign_in", wait_until="domcontentloaded")
-    
-    # Wait for the email input to be visible
-    email_input = _page.locator('input[name="email"]')
+    email_input = _page.locator(
+        '[data-test-id="input-identifier"], input[name="email"], input[type="email"]'
+    ).first
+    await _page.goto("https://secure.gethealthie.com/account/login", wait_until="domcontentloaded")
+    try:
+        await email_input.wait_for(state="visible", timeout=10000)
+    except Exception:
+        if "/account/login" not in _page.url:
+            logger.info("Healthie session already authenticated")
+            return _page
+        raise
+
     await email_input.wait_for(state="visible", timeout=30000)
     await email_input.fill(email)
-    
-    # Wait for password input
-    password_input = _page.locator('input[name="password"]')
-    await password_input.wait_for(state="visible", timeout=30000)
-    await password_input.fill(password)
-    
-    # Find and click the Log In button
-    submit_button = _page.locator('button:has-text("Log In")')
+
+    submit_button = _page.locator('[data-test-id="submit-btn"], button:has-text("Log In")').first
     await submit_button.wait_for(state="visible", timeout=30000)
     await submit_button.click()
-    
-    # Wait for navigation after login
-    await _page.wait_for_timeout(3000)
-    
-    # Check if we've navigated away from the sign-in page
-    current_url = _page.url
-    if "sign_in" in current_url:
-        raise Exception("Login may have failed - still on sign-in page")
+
+    password_input = _page.locator(
+        'input[type="password"], input[name="password"], [data-test-id="input-password"]'
+    ).first
+    await password_input.wait_for(state="visible", timeout=30000)
+    await password_input.fill(password)
+    await submit_button.click()
+
+    try:
+        continue_button = _page.get_by_role("button", name="Continue to App")
+        await continue_button.wait_for(state="visible", timeout=5000)
+        await continue_button.click()
+    except Exception:
+        pass
+
+    try:
+        await _page.wait_for_function(
+            "() => window.location.pathname !== '/account/login'",
+            timeout=30000,
+        )
+    except Exception as exc:
+        error_text = ""
+        error_locator = _page.locator('[role="alert"], [data-test-id*="error"], .error').first
+        if await error_locator.count() > 0:
+            error_text = (await error_locator.inner_text()).strip()
+        raise Exception(f"Login failed on Healthie. {error_text}".strip()) from exc
 
     logger.info("Successfully logged into Healthie")
     return _page
