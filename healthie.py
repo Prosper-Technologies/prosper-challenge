@@ -7,6 +7,7 @@ and appointment scheduling.
 from datetime import datetime
 
 
+import json
 import os
 import re
 
@@ -15,6 +16,13 @@ from loguru import logger
 
 _browser: Browser | None = None
 _page: Page | None = None
+
+DEFAULT_APPOINTMENT_TYPE = "Initial Consultation"
+DEFAULT_CONTACT_TYPE = "Video Call"
+DEFAULT_VIDEO_CALL_METHOD = "Healthie Video Call"
+DEFAULT_TIMEZONE = "Europe/Madrid"
+DEFAULT_APPOINTMENT_NOTES = ""
+DEFAULT_REPEATING_APPOINTMENT = False
 
 def _candidate_dob_formats(date_of_birth: str) -> list[str]:
     """Return normalized DOB strings that may appear in Healthie search results."""
@@ -44,6 +52,67 @@ def _candidate_dob_formats(date_of_birth: str) -> list[str]:
 def _clean_result_name(result_text: str) -> str:
     """Strip the DOB suffix that Healthie appends in search results."""
     return re.sub(r"\s*\(\d{1,2}/\d{1,2}/\d{4}\)\s*$", "", result_text).strip()
+
+
+
+
+
+async def _select_react_option(
+    page: Page,
+    input_selector: str,
+    *,
+    option_text: str | None = None,
+    match_mode: str = "contains",
+) -> str:
+    """Select an option from a Healthie react-select input and return its label."""
+    field_id = input_selector[1:] if input_selector.startswith("#") else None
+    opener_locator = None
+    if field_id:
+        opener_locator = page.locator(
+            f'[data-testid="{field_id}"], [data-input-for="{field_id}"]'
+        ).first
+
+    input_locator = page.locator(input_selector).first
+    await input_locator.wait_for(state="visible", timeout=10000)
+    if opener_locator is not None and await opener_locator.count() > 0:
+        try:
+            await opener_locator.click(force=True)
+        except Exception:
+            await opener_locator.evaluate("(element) => element.click()")
+    else:
+        await input_locator.click(force=True)
+
+    options = page.locator('[id^="react-select-"][id*="-option-"]')
+    await options.first.wait_for(state="visible", timeout=10000)
+    option_count = await options.count()
+
+    chosen_option = None
+    chosen_label = None
+    normalized_target = option_text.lower().strip() if option_text else None
+
+    for index in range(option_count):
+        option = options.nth(index)
+        label = " ".join((await option.inner_text()).split())
+        if not label:
+            continue
+
+        if normalized_target is None:
+            chosen_option = option
+            chosen_label = label
+            break
+
+        candidate = label.lower()
+        is_match = candidate == normalized_target if match_mode == "exact" else normalized_target in candidate
+        if is_match:
+            chosen_option = option
+            chosen_label = label
+            break
+
+    if chosen_option is None:
+        raise RuntimeError(f"Unable to find Healthie dropdown option for {option_text!r}")
+
+    await chosen_option.click()
+    return chosen_label or ""
 
 
 
@@ -232,12 +301,68 @@ async def create_appointment(patient_id: str, date: str, time: str) -> dict | No
             ...
         }
     """
-    # TODO: Implement appointment creation functionality using Playwright
-    # 1. Ensure you're logged in by calling login_to_healthie()
-    # 2. Navigate to the appointment creation page for the patient
-    # 3. Fill in the date and time fields
-    # 4. Submit the appointment creation form
-    # 5. Verify the appointment was created successfully
-    # 6. Return appointment information
-    # 7. Handle errors (e.g., time slot unavailable, invalid date/time)
-    pass
+    page = await login_to_healthie()
+    await page.goto(f"https://secure.gethealthie.com/users/{patient_id}", wait_until="domcontentloaded")
+    await page.wait_for_load_state("domcontentloaded")
+
+    add_appointment_button = page.locator('[data-testid="add-appointment-button"]').first
+    await add_appointment_button.wait_for(state="visible", timeout=15000)
+    await add_appointment_button.click()
+
+    appointment_type = await _select_react_option(
+        page,
+        "#appointment_type_id",
+        option_text=DEFAULT_APPOINTMENT_TYPE,
+    )
+    await _select_react_option(page, "#contact_type", option_text=DEFAULT_CONTACT_TYPE)
+    await _select_react_option(page, "#video_service", option_text=DEFAULT_VIDEO_CALL_METHOD)
+    await _select_react_option(page, "#timezone", option_text=DEFAULT_TIMEZONE)
+
+    date_input = page.locator('input[name="date"]').first
+    await date_input.wait_for(state="visible", timeout=10000)
+    await date_input.fill(date)
+
+    time_input = page.locator('input[name="time"]').first
+    await time_input.wait_for(state="visible", timeout=10000)
+    await time_input.fill(time)
+    await time_input.press("Enter")
+
+    await page.locator('textarea[name="notes"]').first.fill(DEFAULT_APPOINTMENT_NOTES)
+
+    repeating_checkbox = page.locator('input[name="is_repeating"]').first
+    if DEFAULT_REPEATING_APPOINTMENT:
+        await repeating_checkbox.check()
+    else:
+        await repeating_checkbox.uncheck()
+
+    submit_button = page.locator('button[data-testid="primaryButton"]:has-text("Add appointment")').first
+    await submit_button.wait_for(state="visible", timeout=10000)
+
+    async with page.expect_response(
+        lambda response: (
+            response.url == "https://app.gethealthie.com/graphql"
+            and response.request.method == "POST"
+            and "createAppointment" in (response.request.post_data or "")
+        ),
+        timeout=30000,
+    ) as response_info:
+        await submit_button.click()
+    response = await response_info.value
+
+    payload = await response.text()
+    response_data = json.loads(payload)
+    appointment = response_data[0]["data"]["createAppointment"]["appointment"]
+
+    if not appointment or not appointment.get("id"):
+        raise RuntimeError(f"Healthie appointment creation did not return an appointment id: {payload}")
+
+    return {
+        "appointment_id": appointment["id"],
+        "patient_id": patient_id,
+        "appointment_type": appointment.get("appointment_type", {}).get("name") or appointment_type,
+        "contact_type": appointment.get("contact_type"),
+        "date": appointment.get("date"),
+        "time": time,
+        "end": appointment.get("end"),
+        "timezone": appointment.get("timezone_abbr"),
+    }
