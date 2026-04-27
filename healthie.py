@@ -13,6 +13,9 @@ import re
 
 from playwright.async_api import async_playwright, Browser, Page
 from loguru import logger
+from dotenv import load_dotenv
+from pathlib import Path
+
 
 _browser: Browser | None = None
 _page: Page | None = None
@@ -23,6 +26,8 @@ DEFAULT_VIDEO_CALL_METHOD = "Healthie Video Call"
 DEFAULT_TIMEZONE = "Europe/Madrid"
 DEFAULT_APPOINTMENT_NOTES = ""
 DEFAULT_REPEATING_APPOINTMENT = False
+
+load_dotenv(dotenv_path=Path(__file__).with_name(".env"), override=True)
 
 def _candidate_dob_formats(date_of_birth: str) -> list[str]:
     """Return normalized DOB strings that may appear in Healthie search results."""
@@ -316,7 +321,12 @@ async def create_appointment(patient_id: str, date: str, time: str) -> dict | No
     )
     await _select_react_option(page, "#contact_type", option_text=DEFAULT_CONTACT_TYPE)
     await _select_react_option(page, "#video_service", option_text=DEFAULT_VIDEO_CALL_METHOD)
-    await _select_react_option(page, "#timezone", option_text=DEFAULT_TIMEZONE)
+
+    timezone_display = page.locator(".timezone-select__single-value .selected-option-title").first
+    await timezone_display.wait_for(state="visible", timeout=10000)
+    current_timezone = " ".join((await timezone_display.inner_text()).split())
+    if DEFAULT_TIMEZONE not in current_timezone:
+        await _select_react_option(page, "#timezone", option_text=DEFAULT_TIMEZONE)
 
     date_input = page.locator('input[name="date"]').first
     await date_input.wait_for(state="visible", timeout=10000)
@@ -364,5 +374,5 @@ async def create_appointment(patient_id: str, date: str, time: str) -> dict | No
         "date": appointment.get("date"),
         "time": time,
         "end": appointment.get("end"),
-        "timezone": appointment.get("timezone_abbr"),
+        "timezone": appointment.get("timezone_abbr") or current_timezone,
     }
