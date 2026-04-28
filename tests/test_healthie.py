@@ -277,6 +277,35 @@ class FindPatientTests(unittest.IsolatedAsyncioTestCase):
             },
         )
 
+    async def test_find_patient_matches_when_requested_dob_has_ordinal_suffix(self):
+        page = FakePage()
+        search_input = FakeLocator()
+        matched_name_link = FakeLocator(text="Marc Vernet (5/31/2019)", href="/users/15502020")
+        matched_result = FakeLocator(text="MV Marc Vernet (5/31/2019) View Profile Chart Note")
+        matched_result.selector_map = {'[data-testid="header-client-result-name"]': matched_name_link}
+
+        results = FakeLocator(count=1)
+        results.nth_items = [matched_result]
+
+        page.locators = {
+            'input[data-testid="header-client-search-form"], input[placeholder="Search Clients..."], input[aria-label="Search Clients"]': search_input,
+            '[data-testid="header-client-result"]': results,
+        }
+
+        with patch("healthie.login_to_healthie", AsyncMock(return_value=page)):
+            result = await healthie.find_patient("Marc Vernet", "31st May 2019")
+
+        self.assertEqual(matched_name_link.click_calls, 1)
+        self.assertEqual(
+            result,
+            {
+                "patient_id": "15502020",
+                "name": "Marc Vernet",
+                "date_of_birth": "5/31/2019",
+                "profile_url": "/users/15502020",
+            },
+        )
+
 
 class CreateAppointmentTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):

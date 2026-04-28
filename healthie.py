@@ -29,6 +29,35 @@ DEFAULT_REPEATING_APPOINTMENT = False
 
 load_dotenv(dotenv_path=Path(__file__).with_name(".env"), override=True)
 
+
+def _parse_date_value(value: str) -> datetime | None:
+    """Parse a date string using the formats we expect from callers and Healthie."""
+    normalized = value.strip()
+    if not normalized:
+        return None
+
+    # Normalize ordinal day suffixes (e.g. "31st May 2019" -> "31 May 2019").
+    normalized = re.sub(r"\b(\d{1,2})(st|nd|rd|th)\b", r"\1", normalized, flags=re.IGNORECASE)
+
+    for fmt in (
+        "%d/%m/%Y",
+        "%d-%m-%Y",
+        "%Y-%m-%d",
+        "%m/%d/%Y",
+        "%m-%d-%Y",
+        "%d %B %Y",
+        "%d %b %Y",
+        "%B %d, %Y",
+        "%b %d, %Y",
+    ):
+        try:
+            return datetime.strptime(normalized, fmt)
+        except ValueError:
+            continue
+
+    return None
+
+
 def _candidate_dob_formats(date_of_birth: str) -> list[str]:
     """Return normalized DOB strings that may appear in Healthie search results."""
     value = date_of_birth.strip()
@@ -36,22 +65,30 @@ def _candidate_dob_formats(date_of_birth: str) -> list[str]:
         return []
 
     candidates = {value}
-    for fmt in ("%d/%m/%Y", "%d-%m-%Y", "%Y-%m-%d", "%m/%d/%Y", "%m-%d-%Y"):
-        try:
-            parsed = datetime.strptime(value, fmt)
-        except ValueError:
-            continue
-
+    parsed = _parse_date_value(value)
+    if parsed is not None:
         candidates.update(
             {
                 parsed.strftime("%-m/%-d/%Y"),
                 parsed.strftime("%m/%d/%Y"),
                 parsed.strftime("%Y-%m-%d"),
                 parsed.strftime("%d/%m/%Y"),
+                parsed.strftime("%d-%m-%Y"),
+                parsed.strftime("%m-%d-%Y"),
+                parsed.strftime("%B %d, %Y"),
+                parsed.strftime("%b %d, %Y"),
             }
         )
 
-    return [candidate for candidate in candidates if candidate]
+    return sorted(candidate for candidate in candidates if candidate)
+
+
+def _extract_result_dob(result_text: str) -> str | None:
+    """Extract the DOB displayed in a Healthie patient search result."""
+    match = re.search(r"\((\d{1,2}/\d{1,2}/\d{4})\)", result_text)
+    if not match:
+        return None
+    return match.group(1)
 
 
 def _clean_result_name(result_text: str) -> str:
@@ -224,6 +261,7 @@ async def find_patient(name: str, date_of_birth: str) -> dict | None:
 
     page = await login_to_healthie()
     dob_candidates = _candidate_dob_formats(date_of_birth)
+    requested_dob = _parse_date_value(date_of_birth)
 
     search_input = page.locator(
         'input[data-testid="header-client-search-form"], '
@@ -253,7 +291,16 @@ async def find_patient(name: str, date_of_birth: str) -> dict | None:
         if name.lower() not in text.lower():
             continue
 
+        result_dob = _extract_result_dob(text)
+        parsed_result_dob = _parse_date_value(result_dob or "")
         matched_candidate = next((candidate for candidate in dob_candidates if candidate in text), None)
+        dob_matches = bool(matched_candidate)
+
+        if not dob_matches and requested_dob is not None and parsed_result_dob is not None:
+            dob_matches = requested_dob.date() == parsed_result_dob.date()
+            if dob_matches:
+                matched_candidate = result_dob
+
         if not matched_candidate:
             continue
 

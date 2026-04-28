@@ -20,6 +20,7 @@ Run the bot using::
 
 import os
 from dataclasses import dataclass
+from typing import Awaitable, Callable
 
 from dotenv import load_dotenv
 from loguru import logger
@@ -110,6 +111,11 @@ class SchedulingSession:
         self.appointment_date = None
         self.appointment_time = None
 
+    def clear_patient(self) -> None:
+        self.patient_id = None
+        self.appointment_date = None
+        self.appointment_time = None
+
 
 def build_scheduling_tools() -> ToolsSchema:
     return ToolsSchema(
@@ -155,6 +161,151 @@ def build_scheduling_tools() -> ToolsSchema:
     )
 
 
+def _normalize_tool_value(value: object) -> str:
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+async def _handle_patient_lookup(
+    params: FunctionCallParams,
+    session: SchedulingSession,
+) -> None:
+    name = _normalize_tool_value(params.arguments.get("name"))
+    date_of_birth = _normalize_tool_value(params.arguments.get("date_of_birth"))
+
+    session.patient_name = name or None
+    session.date_of_birth = date_of_birth or None
+    session.clear_patient()
+
+    if not name or not date_of_birth:
+        await params.result_callback(
+            {
+                "status": "missing_required_fields",
+                "message": "Both patient name and date of birth are required.",
+            }
+        )
+        return
+
+    try:
+        patient = await find_patient(name=name, date_of_birth=date_of_birth)
+    except Exception as exc:
+        logger.exception("Patient lookup failed")
+        await params.result_callback(
+            {
+                "status": "lookup_error",
+                "message": f"Patient lookup failed: {exc}",
+            }
+        )
+        return
+
+    if not patient or not patient.get("patient_id"):
+        await params.result_callback(
+            {
+                "status": "not_found",
+                "message": "No matching patient record was found.",
+                "name": name,
+                "date_of_birth": date_of_birth,
+            }
+        )
+        return
+
+    session.patient_id = str(patient["patient_id"])
+
+    await params.result_callback(
+        {
+            "status": "found",
+            "message": "Patient record found.",
+            "patient_id": session.patient_id,
+            "name": patient.get("name", name),
+            "date_of_birth": patient.get("date_of_birth", date_of_birth),
+        }
+    )
+
+
+async def _handle_appointment_booking(
+    params: FunctionCallParams,
+    session: SchedulingSession,
+) -> None:
+    date = _normalize_tool_value(params.arguments.get("date"))
+    time = _normalize_tool_value(params.arguments.get("time"))
+
+    session.appointment_date = date or None
+    session.appointment_time = time or None
+
+    if not session.patient_id:
+        await params.result_callback(
+            {
+                "status": "patient_not_selected",
+                "message": "A patient must be found before booking an appointment.",
+            }
+        )
+        return
+
+    if not date or not time:
+        await params.result_callback(
+            {
+                "status": "missing_required_fields",
+                "message": "Both appointment date and time are required.",
+            }
+        )
+        return
+
+    try:
+        appointment = await create_appointment(
+            patient_id=session.patient_id,
+            date=date,
+            time=time,
+        )
+    except Exception as exc:
+        logger.exception("Appointment booking failed")
+        await params.result_callback(
+            {
+                "status": "booking_error",
+                "message": f"Appointment booking failed: {exc}",
+                "patient_id": session.patient_id,
+                "date": date,
+                "time": time,
+            }
+        )
+        return
+
+    if not appointment or not appointment.get("appointment_id"):
+        await params.result_callback(
+            {
+                "status": "booking_failed",
+                "message": "The appointment could not be created.",
+                "patient_id": session.patient_id,
+                "date": date,
+                "time": time,
+            }
+        )
+        return
+
+    await params.result_callback(
+        {
+            "status": "booked",
+            "message": "Appointment created successfully.",
+            "appointment_id": str(appointment["appointment_id"]),
+            "patient_id": session.patient_id,
+            "date": appointment.get("date", date),
+            "time": appointment.get("time", time),
+            "appointment_type": appointment.get("appointment_type"),
+            "contact_type": appointment.get("contact_type"),
+            "timezone": appointment.get("timezone"),
+        }
+    )
+
+
+def build_scheduling_function_handlers(
+    session: SchedulingSession,
+) -> dict[str, Callable[[FunctionCallParams], Awaitable[None]]]:
+    return {
+        "lookup_patient_record": lambda params: _handle_patient_lookup(params, session),
+        "book_appointment": lambda params: _handle_appointment_booking(params, session),
+    }
+
+
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
@@ -187,127 +338,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     rtvi = RTVIProcessor()
 
-    async def lookup_patient_record(params: FunctionCallParams) -> None:
-        name = str(params.arguments.get("name", "")).strip()
-        date_of_birth = str(params.arguments.get("date_of_birth", "")).strip()
-
-        session.patient_name = name or None
-        session.date_of_birth = date_of_birth or None
-        session.patient_id = None
-
-        if not name or not date_of_birth:
-            await params.result_callback(
-                {
-                    "status": "missing_required_fields",
-                    "message": "Both patient name and date of birth are required.",
-                }
-            )
-            return
-
-        try:
-            patient = await find_patient(name=name, date_of_birth=date_of_birth)
-        except Exception as exc:
-            logger.exception("Patient lookup failed")
-            await params.result_callback(
-                {
-                    "status": "lookup_error",
-                    "message": f"Patient lookup failed: {exc}",
-                }
-            )
-            return
-
-        if not patient or not patient.get("patient_id"):
-            await params.result_callback(
-                {
-                    "status": "not_found",
-                    "message": "No matching patient record was found.",
-                    "name": name,
-                    "date_of_birth": date_of_birth,
-                }
-            )
-            return
-
-        session.patient_id = str(patient["patient_id"])
-
-        await params.result_callback(
-            {
-                "status": "found",
-                "message": "Patient record found.",
-                "patient_id": session.patient_id,
-                "name": patient.get("name", name),
-                "date_of_birth": patient.get("date_of_birth", date_of_birth),
-            }
-        )
-
-    async def book_appointment_for_patient(params: FunctionCallParams) -> None:
-        date = str(params.arguments.get("date", "")).strip()
-        time = str(params.arguments.get("time", "")).strip()
-
-        session.appointment_date = date or None
-        session.appointment_time = time or None
-
-        if not session.patient_id:
-            await params.result_callback(
-                {
-                    "status": "patient_not_selected",
-                    "message": "A patient must be found before booking an appointment.",
-                }
-            )
-            return
-
-        if not date or not time:
-            await params.result_callback(
-                {
-                    "status": "missing_required_fields",
-                    "message": "Both appointment date and time are required.",
-                }
-            )
-            return
-
-        try:
-            appointment = await create_appointment(
-                patient_id=session.patient_id,
-                date=date,
-                time=time,
-            )
-        except Exception as exc:
-            logger.exception("Appointment booking failed")
-            await params.result_callback(
-                {
-                    "status": "booking_error",
-                    "message": f"Appointment booking failed: {exc}",
-                    "patient_id": session.patient_id,
-                    "date": date,
-                    "time": time,
-                }
-            )
-            return
-
-        if not appointment or not appointment.get("appointment_id"):
-            await params.result_callback(
-                {
-                    "status": "booking_failed",
-                    "message": "The appointment could not be created.",
-                    "patient_id": session.patient_id,
-                    "date": date,
-                    "time": time,
-                }
-            )
-            return
-
-        await params.result_callback(
-            {
-                "status": "booked",
-                "message": "Appointment created successfully.",
-                "appointment_id": str(appointment["appointment_id"]),
-                "patient_id": session.patient_id,
-                "date": appointment.get("date", date),
-                "time": appointment.get("time", time),
-            }
-        )
-
-    llm.register_function("lookup_patient_record", lookup_patient_record)
-    llm.register_function("book_appointment", book_appointment_for_patient)
+    for function_name, handler in build_scheduling_function_handlers(session).items():
+        llm.register_function(function_name, handler)
 
     pipeline = Pipeline(
         [
