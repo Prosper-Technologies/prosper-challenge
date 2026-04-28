@@ -5,12 +5,14 @@ and appointment scheduling.
 """
 
 from datetime import datetime
+import time
 
 
 import json
 import os
 import re
 
+from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 from playwright.async_api import async_playwright, Browser, Page
 from loguru import logger
 from dotenv import load_dotenv
@@ -26,6 +28,8 @@ DEFAULT_VIDEO_CALL_METHOD = "Healthie Video Call"
 DEFAULT_TIMEZONE = "Europe/Madrid"
 DEFAULT_APPOINTMENT_NOTES = ""
 DEFAULT_REPEATING_APPOINTMENT = False
+# Playwright browser mode toggle for local debugging.
+PLAYWRIGHT_HEADLESS = True
 
 load_dotenv(dotenv_path=Path(__file__).with_name(".env"), override=True)
 
@@ -184,10 +188,21 @@ async def login_to_healthie() -> Page:
         logger.info("Using existing Healthie session")
         return _page
 
+    started_at = time.monotonic()
     logger.info("Logging into Healthie...")
     playwright = await async_playwright().start()
-    _browser = await playwright.chromium.launch(headless=False)
-    _page = await _browser.new_page()
+    _browser = await playwright.chromium.launch(
+        headless=PLAYWRIGHT_HEADLESS,
+        args=["--disable-blink-features=AutomationControlled"] if PLAYWRIGHT_HEADLESS else None,
+    )
+    _page = await _browser.new_page(
+        viewport={"width": 1366, "height": 900},
+        user_agent=(
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/124.0.0.0 Safari/537.36"
+        ),
+    )
 
     email_input = _page.locator(
         '[data-test-id="input-identifier"], input[name="email"], input[type="email"]'
@@ -199,6 +214,7 @@ async def login_to_healthie() -> Page:
         if "/account/login" not in _page.url:
             logger.info("Healthie session already authenticated")
             return _page
+        logger.exception("Healthie login: email input did not appear on login page")
         raise
 
     await email_input.wait_for(state="visible", timeout=30000)
@@ -213,28 +229,77 @@ async def login_to_healthie() -> Page:
     ).first
     await password_input.wait_for(state="visible", timeout=30000)
     await password_input.fill(password)
-    await submit_button.click()
+    password_submit = _page.locator('[data-test-id="submit-btn"], button:has-text("Log In")').first
+    await password_submit.wait_for(state="visible", timeout=10000)
+    await password_submit.click()
 
+    # Healthie may show a passkey interstitial with "Continue to app" after password submit.
+    # In headless mode this can appear slightly later and sometimes as a link-like control.
+    continue_clicked = False
     try:
-        continue_button = _page.get_by_role("button", name="Continue to App")
-        await continue_button.wait_for(state="visible", timeout=5000)
+        continue_button = _page.get_by_role("button", name=re.compile(r"continue to app", re.I))
+        await continue_button.wait_for(state="visible", timeout=12000)
         await continue_button.click()
+        continue_clicked = True
+        logger.info("Healthie login: clicked passkey interstitial continue button")
     except Exception:
-        pass
+        try:
+            continue_link = _page.get_by_role("link", name=re.compile(r"continue to app", re.I))
+            await continue_link.wait_for(state="visible", timeout=12000)
+            await continue_link.click()
+            continue_clicked = True
+            logger.info("Healthie login: clicked passkey interstitial continue link")
+        except Exception:
+            try:
+                continue_text = _page.locator("text=/continue to app/i").first
+                await continue_text.wait_for(state="visible", timeout=12000)
+                await continue_text.click()
+                continue_clicked = True
+                logger.info("Healthie login: clicked passkey interstitial continue text fallback")
+            except Exception:
+                pass
 
     try:
         await _page.wait_for_function(
             "() => window.location.pathname !== '/account/login'",
             timeout=30000,
         )
+    except PlaywrightTimeoutError:
+        # One extra late interstitial pass for headless timing differences.
+        logger.warning("Healthie login: initial navigation wait timed out, trying late continue fallback")
+        try:
+            continue_text = _page.locator("text=/continue to app/i").first
+            await continue_text.wait_for(state="visible", timeout=5000)
+            await continue_text.click()
+            await _page.wait_for_function(
+                "() => window.location.pathname !== '/account/login'",
+                timeout=15000,
+            )
+            logger.info("Healthie login: late continue click succeeded")
+        except Exception as exc:
+            error_text = ""
+            error_locator = _page.locator('[role="alert"], [data-test-id*="error"], .error').first
+            if await error_locator.count() > 0:
+                error_text = (await error_locator.inner_text()).strip()
+            logger.error(
+                "Healthie login failed after timeout fallback. current_url='{}' error_text='{}'",
+                _page.url,
+                error_text,
+            )
+            raise Exception(f"Login failed on Healthie. {error_text}".strip()) from exc
     except Exception as exc:
         error_text = ""
         error_locator = _page.locator('[role="alert"], [data-test-id*="error"], .error').first
         if await error_locator.count() > 0:
             error_text = (await error_locator.inner_text()).strip()
+        logger.error(
+            "Healthie login failed after password submit. current_url='{}' error_text='{}'",
+            _page.url,
+            error_text,
+        )
         raise Exception(f"Login failed on Healthie. {error_text}".strip()) from exc
 
-    logger.info("Successfully logged into Healthie")
+    logger.info("Successfully logged into Healthie in {:.2f}s", time.monotonic() - started_at)
     return _page
 
 
@@ -269,8 +334,15 @@ async def find_patient(name: str, date_of_birth: str) -> dict | None:
         'input[aria-label="Search Clients"]'
     ).first
     await search_input.wait_for(state="visible", timeout=30000)
+    await search_input.click()
     await search_input.fill("")
-    await search_input.fill(name)
+    # Headless mode can miss reactive search handlers when value is set all at once.
+    # Type with key events first, then fall back to fill if needed.
+    try:
+        await search_input.type(name, delay=30)
+    except Exception:
+        await search_input.fill(name)
+        logger.warning("find_patient search input type() failed; fell back to fill() name='{}'", name)
 
     results = page.locator('[data-testid="header-client-result"]')
     try:
@@ -300,8 +372,9 @@ async def find_patient(name: str, date_of_birth: str) -> dict | None:
             dob_matches = requested_dob.date() == parsed_result_dob.date()
             if dob_matches:
                 matched_candidate = result_dob
+                pass
 
-        if not matched_candidate:
+        if not dob_matches:
             continue
 
         name_link = result.locator('[data-testid="header-client-result-name"]').first

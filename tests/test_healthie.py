@@ -15,6 +15,7 @@ class FakeLocator:
         self.click_calls = 0
         self.wait_for_calls = []
         self.press_calls = []
+        self.type_calls = []
         self.check_calls = 0
         self.uncheck_calls = 0
 
@@ -43,6 +44,9 @@ class FakeLocator:
     async def press(self, key):
         self.press_calls.append(key)
 
+    async def type(self, value, delay=None):
+        self.type_calls.append((value, delay))
+
     async def check(self):
         self.check_calls += 1
 
@@ -69,6 +73,7 @@ class FakePage:
         self.wait_for_function = AsyncMock()
         self.wait_for_load_state = AsyncMock()
         self.wait_for_url = AsyncMock(side_effect=self._set_user_url)
+        self.wait_for_timeout = AsyncMock()
         self.role_locators = {}
         self.expected_response = None
         self.expect_response_predicate = None
@@ -219,7 +224,8 @@ class FindPatientTests(unittest.IsolatedAsyncioTestCase):
             result = await healthie.find_patient("Missing Patient", "31/05/2019")
 
         self.assertIsNone(result)
-        self.assertEqual(search_input.fill_calls, ["", "Missing Patient"])
+        self.assertEqual(search_input.fill_calls, [""])
+        self.assertEqual(search_input.type_calls, [("Missing Patient", 30)])
 
     async def test_find_patient_returns_none_when_dob_does_not_match(self):
         page = FakePage()
@@ -263,7 +269,8 @@ class FindPatientTests(unittest.IsolatedAsyncioTestCase):
         with patch("healthie.login_to_healthie", AsyncMock(return_value=page)):
             result = await healthie.find_patient("Marc Vernet", "31/05/2019")
 
-        self.assertEqual(search_input.fill_calls, ["", "Marc Vernet"])
+        self.assertEqual(search_input.fill_calls, [""])
+        self.assertEqual(search_input.type_calls, [("Marc Vernet", 30)])
         self.assertEqual(matched_name_link.click_calls, 1)
         page.wait_for_load_state.assert_awaited_once_with("domcontentloaded")
         page.wait_for_url.assert_awaited_once()
